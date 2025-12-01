@@ -5,128 +5,498 @@ import {
   text,
   timestamp,
   integer,
+  numeric,
+  jsonb,
+  uniqueIndex,
+  pgEnum,
+  index,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  name: varchar('name', { length: 100 }),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  role: varchar('role', { length: 20 }).notNull().default('member'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  deletedAt: timestamp('deleted_at'),
-});
+/* =========================
+ * ENUMS
+ * ========================= */
 
-export const teams = pgTable('teams', {
-  id: serial('id').primaryKey(),
-  name: varchar('name', { length: 100 }).notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  stripeCustomerId: text('stripe_customer_id').unique(),
-  stripeSubscriptionId: text('stripe_subscription_id').unique(),
-  stripeProductId: text('stripe_product_id'),
-  planName: varchar('plan_name', { length: 50 }),
-  subscriptionStatus: varchar('subscription_status', { length: 20 }),
-});
+// Proxies
+export const proxyStatusEnum = pgEnum('proxy_status', [
+  'available',
+  'allocated',
+  'maintenance',
+  'disabled',
+]);
 
-export const teamMembers = pgTable('team_members', {
+// Allocations
+export const allocationStatusEnum = pgEnum('allocation_status', [
+  'active',
+  'expired',
+  'cancelled',
+]);
+
+// Billing
+export const billingStatusEnum = pgEnum('billing_status', [
+  'pending',
+  'paid',
+  'cancelled',
+  'failed',
+]);
+
+export const billingPaymentMethodEnum = pgEnum('billing_payment_method', [
+  'wallet',
+  'stripe',
+]);
+
+// Funds / Wallet
+export const fundsStatusEnum = pgEnum('funds_status', [
+  'pending',
+  'completed',
+  'failed',
+  'refunded',
+]);
+
+export const transactionTypeEnum = pgEnum('transaction_type', [
+  'CREDIT',
+  'DEBIT',
+]);
+
+export const paymentProviderEnum = pgEnum('payment_provider', ['stripe']);
+
+//Subscriptions
+
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'active',
+  'incomplete',
+  'past_due',
+  'canceled',
+  'paused',
+]);
+
+/* =========================
+ * USERS
+ * ========================= */
+
+export const users = pgTable(
+  'users',
+  {
+    id: serial('id').primaryKey(),
+    name: varchar('name', { length: 100 }),
+    email: varchar('email', { length: 255 }).notNull(),
+    passwordHash: text('password_hash').notNull(),
+    stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
+    createdAt: timestamp('created_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+  },
+  (table) => ({
+    emailUniqueIdx: uniqueIndex('users_email_unique').on(table.email),
+    stripeCustomerUniqueIdx: uniqueIndex('users_stripe_customer_unique').on(
+      table.stripeCustomerId
+    ),
+    deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
+  })
+);
+
+/* =========================
+ * PROXIES (4G / xProxy)
+ * ========================= */
+
+export const proxies = pgTable(
+  'proxies',
+  {
+    id: serial('id').primaryKey(),
+    label: varchar('label', { length: 100 }), // ex: "FR-4G-ORANGE-01"
+    ipAddress: varchar('ip_address', { length: 45 }).notNull(),
+    port: integer('port').notNull(),
+    username: varchar('username', { length: 100 }),
+    password: varchar('password', { length: 100 }),
+    location: varchar('location', { length: 100 }), // ex: "Paris, FR"
+    isp: varchar('isp', { length: 100 }), // ex: "Orange"
+    status: proxyStatusEnum('status').notNull().default('available'),
+    lastHealthCheck: timestamp('last_health_check', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+    dongleId: varchar('dongle_id', { length: 100 }),
+    createdAt: timestamp('created_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+  },
+  (table) => ({
+    ipPortUniqueIdx: uniqueIndex('proxies_ip_port_unique').on(
+      table.ipAddress,
+      table.port
+    ),
+    deletedAtIdx: index('proxies_deleted_at_idx').on(table.deletedAt),
+  })
+);
+
+/* =========================
+ * PROXY ALLOCATIONS
+ * (quel user loue quel proxy)
+ * ========================= */
+
+export const proxyAllocations = pgTable('proxy_allocations', {
   id: serial('id').primaryKey(),
   userId: integer('user_id')
     .notNull()
-    .references(() => users.id),
-  teamId: integer('team_id')
+    .references(() => users.id, { onDelete: 'cascade' }),
+  proxyId: integer('proxy_id')
     .notNull()
-    .references(() => teams.id),
-  role: varchar('role', { length: 50 }).notNull(),
-  joinedAt: timestamp('joined_at').notNull().defaultNow(),
+    .references(() => proxies.id, { onDelete: 'cascade' }),
+  startsAt: timestamp('starts_at', {
+    withTimezone: true,
+    mode: 'date',
+  }).notNull(),
+  endsAt: timestamp('ends_at', {
+    withTimezone: true,
+    mode: 'date',
+  }),
+  status: allocationStatusEnum('status').notNull().default('active'),
+  priceMonthly: numeric('price_monthly', {
+    precision: 12,
+    scale: 2,
+  }).notNull()
+    .$type<number>(),
+  // 👇 NOUVEAU : l’abo qui finance cette alloc
+  subscriptionId: integer('subscription_id').references(
+    () => subscriptions.id,
+    {
+      onDelete: 'set null',
+    }
+  ),
+  createdAt: timestamp('created_at', {
+    withTimezone: true,
+    mode: 'date',
+  })
+    .notNull()
+    .defaultNow(),
 });
+
+/* =========================
+ * BILLING (factures)
+ * ========================= */
+
+export const billing = pgTable(
+  'billing',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    subscriptionId: integer('subscription_id').references(
+      () => subscriptions.id
+    ),
+    invoiceNumber: varchar('invoice_number', { length: 100 }),
+    amount: numeric('amount', { precision: 12, scale: 2 })
+      .notNull()
+      .$type<number>(),
+    currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+
+    status: billingStatusEnum('status').notNull().default('pending'),
+
+    paymentMethod: billingPaymentMethodEnum('payment_method')
+      .notNull()
+      .default('stripe'),
+
+    dueDate: timestamp('due_date', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+    paidAt: timestamp('paid_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+
+    paymentProvider: paymentProviderEnum('payment_provider'),
+    paymentReference: varchar('payment_reference', { length: 255 }),
+
+    walletFundsId: integer('wallet_funds_id').references(() => funds.id),
+
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
+    createdAt: timestamp('created_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+  },
+  (table) => ({
+    deletedAtIdx: index('billing_deleted_at_idx').on(table.deletedAt),
+  })
+);
+
+/* =========================
+ * FUNDS (wallet / recharges)
+ * ========================= */
+
+export const funds = pgTable(
+  'funds',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    amount: numeric('amount', { precision: 12, scale: 2 })
+      .notNull()
+      .$type<number>(),
+
+    currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+
+    transactionType: transactionTypeEnum('transaction_type')
+      .notNull()
+      .$type<'CREDIT' | 'DEBIT'>(),
+
+    status: fundsStatusEnum('status').notNull().default('pending'),
+
+    paymentProvider: paymentProviderEnum('payment_provider'),
+    transactionReference: varchar('transaction_reference', { length: 255 }),
+
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
+
+    createdAt: timestamp('created_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+  },
+  (table) => ({
+    deletedAtIdx: index('funds_deleted_at_idx').on(table.deletedAt),
+  })
+);
+
+/* =========================
+ * ACTIVITY LOGS
+ * ========================= */
 
 export const activityLogs = pgTable('activity_logs', {
   id: serial('id').primaryKey(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id),
-  userId: integer('user_id').references(() => users.id),
+  userId: integer('user_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
   action: text('action').notNull(),
-  timestamp: timestamp('timestamp').notNull().defaultNow(),
+  createdAt: timestamp('created_at', {
+    withTimezone: true,
+    mode: 'date',
+  })
+    .notNull()
+    .defaultNow(),
   ipAddress: varchar('ip_address', { length: 45 }),
 });
 
-export const invitations = pgTable('invitations', {
-  id: serial('id').primaryKey(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id),
-  email: varchar('email', { length: 255 }).notNull(),
-  role: varchar('role', { length: 50 }).notNull(),
-  invitedBy: integer('invited_by')
-    .notNull()
-    .references(() => users.id),
-  invitedAt: timestamp('invited_at').notNull().defaultNow(),
-  status: varchar('status', { length: 20 }).notNull().default('pending'),
-});
+/* =========================
+ * SUBSCRIPTIONS
+ * ========================= */
 
-export const teamsRelations = relations(teams, ({ many }) => ({
-  teamMembers: many(teamMembers),
-  activityLogs: many(activityLogs),
-  invitations: many(invitations),
-}));
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: serial('id').primaryKey(),
+
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // 'wallet' ou 'stripe' → ce qu’on a déjà défini plus haut
+    paymentMethod: billingPaymentMethodEnum('payment_method')
+      .notNull()
+      .default('stripe'),
+
+    status: subscriptionStatusEnum('status')
+      .notNull()
+      .default('active'),
+
+    // prix récurrent de l’abo (tu peux dupliquer priceMonthly ici)
+    amountMonthly: numeric('amount_monthly', {
+      precision: 12,
+      scale: 2,
+    })
+      .notNull()
+      .$type<number>(),
+
+    currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+
+    // Stripe (optionnel si paymentMethod = 'wallet')
+    stripeSubscriptionId: varchar('stripe_subscription_id', {
+      length: 255,
+    }),
+    stripePriceId: varchar('stripe_price_id', { length: 255 }),
+
+    // périodes de facturation
+    currentPeriodStart: timestamp('current_period_start', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+    currentPeriodEnd: timestamp('current_period_end', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+    cancelAt: timestamp('cancel_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+    canceledAt: timestamp('canceled_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
+
+    createdAt: timestamp('created_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', {
+      withTimezone: true,
+      mode: 'date',
+    })
+      .notNull()
+      .defaultNow(),
+  }
+);
+
+
+/* =========================
+ * RELATIONS
+ * ========================= */
 
 export const usersRelations = relations(users, ({ many }) => ({
-  teamMembers: many(teamMembers),
-  invitationsSent: many(invitations),
+  activityLogs: many(activityLogs),
+  proxyAllocations: many(proxyAllocations),
+  billing: many(billing),
+  funds: many(funds),
 }));
 
-export const invitationsRelations = relations(invitations, ({ one }) => ({
-  team: one(teams, {
-    fields: [invitations.teamId],
-    references: [teams.id],
-  }),
-  invitedBy: one(users, {
-    fields: [invitations.invitedBy],
-    references: [users.id],
-  }),
+export const proxiesRelations = relations(proxies, ({ many }) => ({
+  proxyAllocations: many(proxyAllocations),
 }));
 
-export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
+export const subscriptionsRelations = relations(subscriptions, ({ one, many }) => ({
   user: one(users, {
-    fields: [teamMembers.userId],
+    fields: [subscriptions.userId],
     references: [users.id],
   }),
-  team: one(teams, {
-    fields: [teamMembers.teamId],
-    references: [teams.id],
+  proxyAllocations: many(proxyAllocations),
+  billing: many(billing),
+}));
+
+export const proxyAllocationsRelations = relations(
+  proxyAllocations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [proxyAllocations.userId],
+      references: [users.id],
+    }),
+    proxy: one(proxies, {
+      fields: [proxyAllocations.proxyId],
+      references: [proxies.id],
+    }),
+    subscription: one(subscriptions, {
+      fields: [proxyAllocations.subscriptionId],
+      references: [subscriptions.id],
+    }),
+  })
+);
+
+
+export const billingRelations = relations(billing, ({ one }) => ({
+  user: one(users, {
+    fields: [billing.userId],
+    references: [users.id],
+  }),
+}));
+
+export const fundsRelations = relations(funds, ({ one }) => ({
+  user: one(users, {
+    fields: [funds.userId],
+    references: [users.id],
   }),
 }));
 
 export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
-  team: one(teams, {
-    fields: [activityLogs.teamId],
-    references: [teams.id],
-  }),
   user: one(users, {
     fields: [activityLogs.userId],
     references: [users.id],
   }),
 }));
 
+
+/* =========================
+ * TYPES
+ * ========================= */
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
-export type Team = typeof teams.$inferSelect;
-export type NewTeam = typeof teams.$inferInsert;
-export type TeamMember = typeof teamMembers.$inferSelect;
-export type NewTeamMember = typeof teamMembers.$inferInsert;
+
+export type Proxy = typeof proxies.$inferSelect;
+export type NewProxy = typeof proxies.$inferInsert;
+
+export type ProxyAllocation = typeof proxyAllocations.$inferSelect;
+export type NewProxyAllocation = typeof proxyAllocations.$inferInsert;
+
+export type Billing = typeof billing.$inferSelect;
+export type NewBilling = typeof billing.$inferInsert;
+
+export type Funds = typeof funds.$inferSelect;
+export type NewFunds = typeof funds.$inferInsert;
+
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
-export type Invitation = typeof invitations.$inferSelect;
-export type NewInvitation = typeof invitations.$inferInsert;
-export type TeamDataWithMembers = Team & {
-  teamMembers: (TeamMember & {
-    user: Pick<User, 'id' | 'name' | 'email'>;
-  })[];
-};
+
+export type Subscription = typeof subscriptions.$inferSelect;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+
+/* =========================
+ * ACTIVITY TYPES
+ * ========================= */
 
 export enum ActivityType {
   SIGN_UP = 'SIGN_UP',
@@ -135,8 +505,12 @@ export enum ActivityType {
   UPDATE_PASSWORD = 'UPDATE_PASSWORD',
   DELETE_ACCOUNT = 'DELETE_ACCOUNT',
   UPDATE_ACCOUNT = 'UPDATE_ACCOUNT',
-  CREATE_TEAM = 'CREATE_TEAM',
-  REMOVE_TEAM_MEMBER = 'REMOVE_TEAM_MEMBER',
-  INVITE_TEAM_MEMBER = 'INVITE_TEAM_MEMBER',
-  ACCEPT_INVITATION = 'ACCEPT_INVITATION',
+
+  ALLOCATE_PROXY = 'ALLOCATE_PROXY',
+  RELEASE_PROXY = 'RELEASE_PROXY',
+  RENEW_PROXY = 'RENEW_PROXY',
+
+  ADD_FUNDS = 'ADD_FUNDS',
+  CREATE_INVOICE = 'CREATE_INVOICE',
+  PAY_INVOICE = 'PAY_INVOICE',
 }
