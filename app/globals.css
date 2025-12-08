@@ -117,3 +117,111 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Chrome, Edge, Safari */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.rainbow-text {
+  background-image: linear-gradient(
+    120deg,
+    #ff004c,
+    #ff7a00,
+    #ffea00,
+    #33ff00,
+    #00ffd5,
+    #0099ff,
+    #6a00ff,
+    #b000ff,
+    #ff00c8,
+    #ff004c
+  );
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+
+  /* Glow léger autour du texte */
+  text-shadow:
+    0 0 6px rgba(255, 255, 255, 0.25),
+    0 0 14px rgba(255, 0, 200, 0.3);
+
+  animation:
+    rainbowShift 7s ease-in-out infinite,
+    glowPulse 2.6s ease-in-out infinite;
+}
+
+/* Animation du dégradé (il se déplace doucement) */
+@keyframes rainbowShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Respiration du glow */
+@keyframes glowPulse {
+  0% {
+    text-shadow:
+      0 0 4px rgba(255, 255, 255, 0.2),
+      0 0 10px rgba(255, 0, 200, 0.25);
+  }
+  50% {
+    text-shadow:
+      0 0 10px rgba(255, 255, 255, 0.5),
+      0 0 22px rgba(255, 0, 200, 0.45);
+  }
+  100% {
+    text-shadow:
+      0 0 4px rgba(255, 255, 255, 0.2),
+      0 0 10px rgba(255, 0, 200, 0.25);
+  }
+}
+/*
+  ---break---
+*/
+:root {
+  --sidebar: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+/*
+  ---break---
+*/
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

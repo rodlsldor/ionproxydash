@@ -1,7 +1,7 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
-import { Manrope } from 'next/font/google';
-import { SWRConfig } from 'swr';
+import { Lexend_Deca } from 'next/font/google';
+import { AuthSessionProvider } from '@/components/auth/session-provider';
 // import { getUser, getTeamForUser } from '@/lib/db/queries';
 
 export const metadata: Metadata = {
@@ -13,8 +13,9 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-const manrope = Manrope({
+const lexend = Lexend_Deca({
   subsets: ['latin'],
+  weight: ['300'],
 });
 
 export default function RootLayout({
@@ -23,20 +24,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={manrope.className}>
-      <body className="min-h-[100dvh]">
-        <SWRConfig
-          value={{
-            fallback: {
-              // On ne await pas ici :
-              // seuls les composants qui lisent ces clés vont suspendre
-              // '/api/user': getUser(),
-              // '/api/team': getTeamForUser(),
-            },
-          }}
-        >
+    <html lang="en">
+      <body className={`min-h-[100dvh] ${lexend.className}`}>
+        <AuthSessionProvider>
           {children}
-        </SWRConfig>
+        </AuthSessionProvider>
       </body>
     </html>
   );

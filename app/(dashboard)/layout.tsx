@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import useSWR, { mutate } from 'swr';
+import { signOut as nextAuthSignOut, useSession } from 'next-auth/react';
+
 import { Button } from '@/components/ui/button';
 import { Home, LogOut } from 'lucide-react';
 import {
@@ -11,26 +12,22 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-// import { signOut } from '@/app/(login)/actions';
-import { User } from '@/lib/db/schema';
 import Image from 'next/image';
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 function UserMenu() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { data: user } = useSWR<User>('/api/user', fetcher);
+  const { data: session, status } = useSession();
   const router = useRouter();
 
-  async function handleSignOut() {
-    await signOut();
-    mutate('/api/user');
-    router.push('/');
+  // Pas connecté → bouton Sign In + Pricing
+  if (status === 'loading') {
+    return null; // ou un skeleton léger si tu veux
   }
 
-  if (!user) {
+  if (status === 'unauthenticated' || !session?.user) {
     return (
       <>
         <Link
@@ -40,11 +37,17 @@ function UserMenu() {
           Pricing
         </Link>
         <Button asChild className="rounded-full">
-          <Link href="/sign-up">Sign Up</Link>
+          <Link href="/sign-in">Sign In</Link>
         </Button>
       </>
     );
   }
+
+  const user = session.user as {
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
 
   const initials = (user.name || user.email || '?')
     .split(' ')
@@ -53,30 +56,49 @@ function UserMenu() {
     .join('')
     .toUpperCase();
 
+  async function handleSignOut() {
+    await nextAuthSignOut({
+      callbackUrl: '/', // redirection après logout
+    });
+  }
+
   return (
     <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-      <DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>
         <Avatar className="cursor-pointer size-9">
-          {/* Tu pourras brancher user.image ici si tu l’as en BDD */}
-          <AvatarImage alt={user.name || user.email || ''} />
+          <AvatarImage
+            src={user.image ?? undefined}
+            alt={user.name || user.email || 'Profile'}
+          />
           <AvatarFallback>{initials}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
+
       <DropdownMenuContent align="end" className="flex flex-col gap-1">
+        {/* Header du menu */}
+        <div className="px-2 py-1.5 text-sm text-muted-foreground">
+          {user.email}
+        </div>
+
         <DropdownMenuItem asChild className="cursor-pointer">
           <Link href="/dashboard" className="flex w-full items-center">
             <Home className="mr-2 h-4 w-4" />
             <span>Dashboard</span>
           </Link>
         </DropdownMenuItem>
-        <form action={handleSignOut} className="w-full">
-          <button type="submit" className="flex w-full">
-            <DropdownMenuItem className="w-full flex-1 cursor-pointer">
-              <LogOut className="mr-2 h-4 w-4" />
-              <span>Sign out</span>
-            </DropdownMenuItem>
-          </button>
-        </form>
+
+        <DropdownMenuSeparator />
+
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="flex w-full"
+        >
+          <DropdownMenuItem className="w-full flex-1 cursor-pointer text-red-600">
+            <LogOut className="mr-2 h-4 w-4" />
+            <span>Sign out</span>
+          </DropdownMenuItem>
+        </button>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -100,7 +122,6 @@ function Header() {
     </header>
   );
 }
-
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (

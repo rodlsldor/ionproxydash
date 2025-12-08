@@ -16,7 +16,7 @@ import {
 import { db } from '../drizzle';
 
 /* ======================
- * TYPES (OPTIONNEL MAIS PRATIQUE)
+ * TYPES
  * ====================== */
 
 import {
@@ -36,7 +36,13 @@ export type SubscriptionStatus = Subscription['status'];
 
 export type CreateSubscriptionInput = {
   userId: number;
+
+  /**
+   * Montant mensuel dans la devise (USD) tel que stocké en DB
+   * Exemple : 19.99 pour 19,99 $
+   */
   amountMonthly: number;
+
   currency?: string;
   paymentMethod: PaymentMethod;
   stripeSubscriptionId?: string | null;
@@ -75,7 +81,7 @@ export async function createSubscription(
     status ??
     (paymentMethod === 'wallet'
       ? 'active'
-      : 'incomplete'); // à adapter à ton goût
+      : 'incomplete');
 
   const [row] = await db
     .insert(subscriptions)
@@ -107,7 +113,13 @@ export async function createSubscription(
 export type CreateSubscriptionForProxyInput = {
   userId: number;
   proxyId: number;
+
+  /**
+   * Prix mensuel du proxy dans la devise (USD)
+   * Exemple : 15 pour 15 $
+   */
   priceMonthly: number;
+
   currency?: string;
   paymentMethod: PaymentMethod;
   stripeSubscriptionId?: string | null;
@@ -170,7 +182,7 @@ export async function createSubscriptionForProxy(
       startsAt: now,
       endsAt,
       status: 'active',
-      priceMonthly: priceMonthly,
+      priceMonthly,
       subscriptionId: subscription.id,
       createdAt: now,
     } satisfies Omit<ProxyAllocation, 'id'>)
@@ -294,7 +306,7 @@ export async function cancelSubscription(
 }
 
 // ============================
-// (Optionnel) Lier billing <-> subscription
+// Lier billing <-> subscription
 // ============================
 
 /**

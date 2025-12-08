@@ -1,10 +1,45 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { User, Smartphone, Repeat, FileQuestion, LifeBuoy, Menu, Wallet, Newspaper} from 'lucide-react';
+import {
+  Sidebar,
+  SidebarHeader,
+  SidebarFooter,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarProvider,
+  SidebarInset,
+  SidebarTrigger,
+  SidebarRail,
+} from '@/components/ui/sidebar';
+import {
+  User,
+  Smartphone,
+  Repeat,
+  FileQuestion,
+  Wallet,
+  Newspaper,
+  Menu,
+} from 'lucide-react';
+import Image from 'next/image';
+
+const navItems = [
+  { href: '/dashboard', icon: User, label: 'Overview' },
+  { href: '/dashboard/proxies', icon: Smartphone, label: 'My Proxies' },
+  { href: '/dashboard/subs', icon: Repeat, label: 'Subscriptions' },
+  { href: '/dashboard/help', icon: FileQuestion, label: 'Help Center' },
+  { href: '/dashboard/profile', icon: User, label: 'Profile' },
+  { href: '/dashboard/funds', icon: Wallet, label: 'Funds' },
+  { href: '/dashboard/billing', icon: Newspaper, label: 'Billings' },
+];
 
 export default function DashboardLayout({
   children,
@@ -12,67 +47,65 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  const navItems = [
-    { href: '/dashboard', icon: User, label: 'Overview' },
-    { href: '/dashboard/proxies', icon: Smartphone, label: 'My Proxies' },
-    { href: '/dashboard/subs', icon: Repeat, label: 'Subscriptions' },
-    { href: '/dashboard/help', icon: FileQuestion, label: 'Help Center' },
-    { href: '/dashboard/supp', icon: LifeBuoy, label: 'Support' },
-    { href: '/dashboard/profile', icon: User, label: 'Profile' },
-    { href: '/dashboard/funds', icon: Wallet, label: 'Funds' },
-    { href: '/dashboard/billing', icon: Newspaper, label: 'Billings' }
-  ];
-
-  const sidebarBaseClasses =
-    'w-64 border-r bg-card border-border transform transition-transform duration-300 ease-in-out lg:relative lg:block lg:translate-x-0';
-  const sidebarStateClasses = isSidebarOpen
-    ? 'absolute inset-y-0 left-0 z-40 translate-x-0 block lg:block'
-    : 'absolute inset-y-0 left-0 z-40 -translate-x-full lg:translate-x-0 hidden lg:block';
 
   return (
-    <div className="flex flex-col min-h-[calc(100dvh-68px)] w-full">
-      {/* Mobile header */}
-      <div className="flex items-center justify-between border-b bg-card border-border p-4 lg:hidden">
-        <div className="flex items-center">
-          <span className="text-sm font-medium text-foreground">Settings</span>
-        </div>
-        <Button
-          className="-mr-3"
-          variant="ghost"
-          onClick={() => setIsSidebarOpen((prev) => !prev)}
-        >
-          <Menu className="h-6 w-6" />
-          <span className="sr-only">Toggle sidebar</span>
-        </Button>
-      </div>
+    <SidebarProvider className='bg-sidebar'>
+      {/* Sidebar */}
+      <Sidebar className='bg-sidebar'>
+        <SidebarHeader className="px-4 py-3">
+          <Image
+            src='/images/Logo-Ion-Proxy.png'
+            alt='Ion Proxy Logo'
+            width={200}
+            height={200}
+          />
+        </SidebarHeader>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className={`${sidebarBaseClasses} ${sidebarStateClasses}`}>
-          <nav className="h-full overflow-y-auto p-4">
-            {navItems.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link key={item.href} href={item.href}>
-                  <Button
-                    variant={isActive ? 'secondary' : 'ghost'}
-                    className="my-1 flex w-full justify-start shadow-none rounded-2xl"
-                    onClick={() => setIsSidebarOpen(false)}
-                  >
-                    <item.icon className="mr-2 h-4 w-4" />
-                    {item.label}
-                  </Button>
-                </Link>
-              );
-            })}
-          </nav>
-        </aside>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel className='text-sm'>Navigation</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {navItems.map((item) => {
+                  const isActive = pathname === item.href;
 
-        {/* Main content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
-      </div>
-    </div>
+                  return (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton className='rounded-2xl transition transition-duration-1000 ease-in-out' asChild isActive={isActive}>
+                        <Link href={item.href}>
+                          <item.icon className="mr-2 h-4 w-4" />
+                          <span className='text-md'>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+
+        <SidebarFooter className="px-4 py-3">
+          <Button variant="outline" className="w-full rounded-2xl text-sm">
+            Logout
+          </Button>
+        </SidebarFooter>
+
+        <SidebarRail />
+      </Sidebar>
+
+      {/* Main area + mobile header */}
+      <SidebarInset>
+        <header className="flex h-14 items-center gap-2 border-b px-4">
+          <SidebarTrigger>
+            <Menu className="h-6 w-6" />
+          </SidebarTrigger>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          {children}
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

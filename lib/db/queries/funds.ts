@@ -74,7 +74,9 @@ export async function getUserBalance(userId: number): Promise<number> {
   let balance = 0;
 
   for (const row of rows) {
-    const amount = row.amount;
+    const amount = Number(row.amount);
+
+    if (!Number.isFinite(amount)) continue;
 
     if (row.transactionType === 'CREDIT') {
       balance += amount;
@@ -83,7 +85,7 @@ export async function getUserBalance(userId: number): Promise<number> {
     }
   }
 
-  return balance;
+  return Number(balance.toFixed(2));
 }
 
 export async function addFunds(input: {
@@ -93,20 +95,23 @@ export async function addFunds(input: {
   transactionReference?: string | null;
   metadata?: FundMetadata;
 }): Promise<Funds> {
-  // Crédit le wallet
 
-  // 1. Valide le montant
-  if (input.amount <= 0) {
-    throw new Error('Amount must be positive');
+  const amount = Number(input.amount);
+
+  // 1. Validation du montant
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Amount must be a positive number');
   }
 
   // 2. Crée la transaction de crédit
   return createFundTransaction({
     ...input,
+    amount,
     transactionType: 'credit',
     status: 'completed',
   });
 }
+
 
 export async function deductFunds(input: {
   userId: number;
@@ -116,29 +121,32 @@ export async function deductFunds(input: {
   transactionReference?: string | null;
   metadata?: FundMetadata;
 }): Promise<Funds> {
-  // Débite un montant
 
-  const { userId, amount, allowNegative = false } = input;
+  const { userId, allowNegative = false } = input;
+  const amount = Number(input.amount);
 
-  // Vérifie le solde disponible
-  if (amount <= 0) {
-    throw new Error('Amount must be positive');
+  // 1. Validation
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Amount must be a positive number');
   }
 
-  const balance = await getUserBalance(userId);
+  // 2. Récupère le solde réel
+  const balance = Number(await getUserBalance(userId));
 
-  // S'il n'y a pas assez de fonds
+  // 3. Vérifie solvabilité
   if (!allowNegative && balance < amount) {
     throw new Error('Insufficient balance');
   }
 
-  // Crée la transaction de débit
+  // 4. Crée la transaction
   return createFundTransaction({
     ...input,
+    amount,
     transactionType: 'debit',
     status: 'completed',
   });
 }
+
 
 export async function refundFunds(input: {
   userId: number;
@@ -183,8 +191,10 @@ export async function createFundTransaction(input: CreateFundTransactionInput ):
     paymentProvider = null,
   } = input;
 
-  if (amount <= 0) {
-    throw new Error('Funds amount must be positive');
+  const safeAmount = Number(amount);
+
+  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    throw new Error('Invalid funds amount');
   }
 
   const dbTransactionType: NewFunds['transactionType'] =
@@ -194,7 +204,7 @@ export async function createFundTransaction(input: CreateFundTransactionInput ):
     .insert(funds)
     .values({
       userId,
-      amount,
+      amount: safeAmount,
       currency,
       transactionType: dbTransactionType,
       status,
@@ -206,4 +216,78 @@ export async function createFundTransaction(input: CreateFundTransactionInput ):
     .returning();
 
   return row;
+}
+
+export async function createPendingTopup(input: {
+  userId: number;
+  amount: number;
+  currency?: string;
+  metadata?: FundMetadata;
+  paymentProvider?: 'stripe' | null;
+}): Promise<Funds> {
+  const {
+    userId,
+    amount,
+    currency = 'USD',
+    metadata = null,
+    paymentProvider = 'stripe',
+  } = input;
+
+  if (amount <= 0) {
+    throw new Error('Amount must be positive');
+  }
+
+  // On crée un CREDIT en statut "pending"
+  return createFundTransaction({
+    userId,
+    amount,
+    currency,
+    transactionType: 'credit',
+    status: 'pending',
+    metadata,
+    paymentProvider,
+    transactionReference: null,
+  });
+}
+
+export async function markFundsCompleted(
+  fundsId: number,
+  input: {
+    transactionReference?: string | null;
+    metadata?: FundMetadata;
+  } = {}
+): Promise<Funds | null> {
+  const { transactionReference = null, metadata } = input;
+
+  const [row] = await db
+    .update(funds)
+    .set({
+      status: 'completed',
+      transactionReference,
+      metadata: metadata ?? undefined,
+      updatedAt: new Date(),
+    })
+    .where(eq(funds.id, fundsId))
+    .returning();
+
+  return row ?? null;
+}
+
+export async function getFundsByIdForUser(
+  fundsId: number,
+  userId: number
+): Promise<Funds | null> {
+  const rows = await db
+    .select()
+    .from(funds)
+    .where(
+      and(
+        eq(funds.id, fundsId),
+        eq(funds.userId, userId),
+        isNull(funds.deletedAt)
+      )
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
 }

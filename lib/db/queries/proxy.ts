@@ -21,6 +21,7 @@ import { db } from '../drizzle';
 
 import {
   proxies,
+  proxyAllocations,
 } from '../schema';
 
 /* ======================
@@ -327,4 +328,35 @@ export async function detachDongle(proxyId: number): Promise<Proxy | null> {
     .returning();
 
   return proxy ?? null;
+}
+
+export async function getUserAllocatedProxies(userId: number) {
+  // Proxies alloués au user, avec infos allocation
+  const rows = await db
+    .select({
+      allocationId: proxyAllocations.id,
+      proxyId: proxies.id,
+      label: proxies.label,
+      ipAddress: proxies.ipAddress,
+      port: proxies.port,
+      location: proxies.location,
+      isp: proxies.isp,
+      status: proxies.status,
+      dongleId: proxies.dongleId,
+      lastHealthCheck: proxies.lastHealthCheck,
+      startsAt: proxyAllocations.startsAt,
+      endsAt: proxyAllocations.endsAt,
+    })
+    .from(proxyAllocations)
+    .innerJoin(proxies, eq(proxyAllocations.proxyId, proxies.id))
+    .where(
+      and(
+        eq(proxyAllocations.userId, userId),
+        eq(proxyAllocations.status, 'active'),
+        isNull(proxies.deletedAt)
+      )
+    )
+    .orderBy(proxyAllocations.startsAt);
+
+  return rows;
 }

@@ -7,6 +7,9 @@ import {
   and,
   isNull,
   desc,
+  gte,
+  lte,
+  sql,
 } from 'drizzle-orm';
 
 /* ======================
@@ -14,6 +17,7 @@ import {
  * ====================== */
 
 import { db } from '../drizzle';
+import { startOfMonth, endOfMonth } from 'date-fns';
 
 /* ======================
  * TABLES / SCHEMA
@@ -24,15 +28,14 @@ import {
 } from '../schema';
 
 /* ======================
- * TYPES (OPTIONNEL MAIS PRATIQUE)
+ * TYPES
  * ====================== */
 
 import type {
   Billing,
-  NewBilling,
 } from '../schema';
 
-//BILLING TYPES
+// BILLING TYPES
 
 type CreateInvoiceInput = {
   userId: number;
@@ -56,12 +59,37 @@ type BillingSummary = {
 type InvoiceStatus = 'pending' | 'paid' | 'cancelled' | 'failed';
 
 /* ======================
- * BILLING/FACTURES
+ * HELPERS
  * ====================== */
 
-export async function createInvoice(input: CreateInvoiceInput): Promise<Billing> {
-  // Crée une facture
+/**
+ * Génère un numéro de facture unique, suffisamment randomisé.
+ */
+export async function generateInvoiceNumber(userId?: number): Promise<string> {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
 
+  const datePart = `${now.getFullYear()}${pad(
+    now.getMonth() + 1
+  )}${pad(now.getDate())}`;
+
+  const rand = Math.floor(Math.random() * 1_000_000)
+    .toString()
+    .padStart(6, '0');
+
+  const userPart = userId ? `U${userId}` : 'UXXX';
+
+  return `INV-${datePart}-${userPart}-${rand}`;
+}
+
+/* ======================
+ * BILLING / FACTURES
+ * ====================== */
+
+/**
+ * Crée une facture "pending" pour un user.
+ */
+export async function createInvoice(input: CreateInvoiceInput): Promise<Billing> {
   const {
     userId,
     amount,
@@ -77,39 +105,42 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<Billing>
   }
 
   const number = invoiceNumber ?? (await generateInvoiceNumber(userId));
-
-  const values: Omit<NewBilling, 'id' | 'createdAt'> = {
-    userId,
-    amount,
-    currency,
-    status: 'pending',
-    paymentMethod,          // ✅ nouveau champ
-    dueDate,
-    invoiceNumber: number,
-    metadata,
-    updatedAt: new Date(),
-    // champs Stripe **uniquement si méthode = stripe**
-    paymentProvider: paymentMethod === 'stripe' ? 'stripe' : null,
-    paymentReference: null,
-    // lien wallet à NULL par défaut
-    walletFundsId: null,
-  };
+  const now = new Date();
 
   const [row] = await db
     .insert(billing)
-    .values(values)
+    .values({
+      userId,
+      amount,
+      currency,
+      status: 'pending',
+      paymentMethod,
+      dueDate,
+      invoiceNumber: number,
+      metadata,
+      updatedAt: now,
+      // Stripe uniquement si paymentMethod = 'stripe'
+      paymentProvider: paymentMethod === 'stripe' ? 'stripe' : null,
+      paymentReference: null,
+      // lien wallet null par défaut
+      walletFundsId: null,
+    })
     .returning();
 
   return row;
 }
 
-export async function markInvoicePaid(invoiceId: number, options?: {
-  paymentReference?: string | null;
-  metadata?: Record<string, unknown> | null;
-  walletFundsId?: number | null;
-}): Promise<Billing | null> {
-  // Marque une facture comme payée
-
+/**
+ * Marque une facture comme payée.
+ */
+export async function markInvoicePaid(
+  invoiceId: number,
+  options?: {
+    paymentReference?: string | null;
+    metadata?: Record<string, unknown> | null;
+    walletFundsId?: number | null;
+  }
+): Promise<Billing | null> {
   const now = new Date();
 
   const [row] = await db
@@ -128,20 +159,42 @@ export async function markInvoicePaid(invoiceId: number, options?: {
   return row ?? null;
 }
 
-export async function cancelInvoice(invoiceId: number, reason?: string): Promise<Billing | null> {
-  // Annule une facture
-
+/**
+ * Annule une facture, en mergeant éventuellement une raison dans la metadata.
+ */
+export async function cancelInvoice(
+  invoiceId: number,
+  reason?: string
+): Promise<Billing | null> {
   const now = new Date();
 
-  // on merge éventuellement la raison dans metadata
+  // On récupère l'ancienne metadata pour merge proprement
+  const [existing] = await db
+    .select({
+      metadata: billing.metadata,
+    })
+    .from(billing)
+    .where(and(eq(billing.id, invoiceId), isNull(billing.deletedAt)));
+
+  let mergedMetadata: Record<string, unknown> | null = null;
+
+  if (existing?.metadata && typeof existing.metadata === 'object') {
+    mergedMetadata = { ...existing.metadata };
+  }
+
+  if (reason) {
+    mergedMetadata = {
+      ...(mergedMetadata ?? {}),
+      cancelReason: reason,
+    };
+  }
+
   const [row] = await db
     .update(billing)
     .set({
       status: 'cancelled',
       updatedAt: now,
-      metadata: reason
-        ? { reason }
-        : null,
+      metadata: mergedMetadata,
     })
     .where(and(eq(billing.id, invoiceId), isNull(billing.deletedAt)))
     .returning();
@@ -149,11 +202,13 @@ export async function cancelInvoice(invoiceId: number, reason?: string): Promise
   return row ?? null;
 }
 
-export async function getUserInvoices(userId: number, options?: {
-  includeDeleted?: boolean
-}): Promise<Billing[]> {
-  // Liste des factures utilisateur
-
+/**
+ * Liste les factures d'un utilisateur.
+ */
+export async function getUserInvoices(
+  userId: number,
+  options?: { includeDeleted?: boolean }
+): Promise<Billing[]> {
   const baseWhere = eq(billing.userId, userId);
 
   if (options?.includeDeleted) {
@@ -171,31 +226,91 @@ export async function getUserInvoices(userId: number, options?: {
     .orderBy(desc(billing.createdAt));
 }
 
-export async function generateInvoiceNumber(userId?: number): Promise<string> {
-  // Génère un numéro unique
+/**
+ * Récupère une facture par ID (sans les supprimées).
+ */
+export async function getInvoiceById(invoiceId: number): Promise<Billing | null> {
+  const [row] = await db
+    .select()
+    .from(billing)
+    .where(and(eq(billing.id, invoiceId), isNull(billing.deletedAt)));
 
+  return row ?? null;
+}
+
+/**
+ * Récupère une facture par numéro (sans les supprimées).
+ */
+export async function getInvoiceByNumber(
+  invoiceNumber: string
+): Promise<Billing | null> {
+  const [row] = await db
+    .select()
+    .from(billing)
+    .where(
+      and(
+        eq(billing.invoiceNumber, invoiceNumber),
+        isNull(billing.deletedAt)
+      )
+    );
+
+  return row ?? null;
+}
+
+/**
+ * Soft delete d'une facture.
+ */
+export async function deleteInvoice(invoiceId: number): Promise<Billing | null> {
   const now = new Date();
-  const pad = (n: number) => n.toString().padStart(2, '0');
 
-  const datePart = `${now.getFullYear()}${pad(
-    now.getMonth() + 1
-  )}${pad(now.getDate())}`;
+  const [row] = await db
+    .update(billing)
+    .set({
+      deletedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(billing.id, invoiceId))
+    .returning();
 
-  const rand = Math.floor(Math.random() * 1_000_000)
-    .toString()
-    .padStart(6, '0');
-
-  const userPart = userId ? `U${userId}` : 'UXXX';
-
-  return `INV-${datePart}-${userPart}-${rand}`;
+  return row ?? null;
 }
 
-export async function createMonthlyInvoice() {
-  // Facturation mensuelle des proxies
+/**
+ * Relance un paiement échoué :
+ * - remet le statut à "pending"
+ * - reset paidAt, paymentReference, walletFundsId
+ * - garde le même paymentMethod / paymentProvider
+ */
+export async function retryPayment(
+  invoiceId: number,
+  options?: {
+    metadata?: Record<string, unknown> | null;
+  }
+): Promise<Billing | null> {
+  const now = new Date();
+
+  const [row] = await db
+    .update(billing)
+    .set({
+      status: 'pending',
+      paidAt: null,
+      paymentReference: null,
+      walletFundsId: null,
+      metadata: options?.metadata ?? null,
+      updatedAt: now,
+    })
+    .where(and(eq(billing.id, invoiceId), isNull(billing.deletedAt)))
+    .returning();
+
+  return row ?? null;
 }
 
+/**
+ * Retourne un résumé des factures d'un user :
+ * - totaux par statut
+ * - nombre de factures par type
+ */
 export async function getBillingSummary(userId: number): Promise<BillingSummary> {
-  // Total payé, factures actives, etc.
   const rows = await db
     .select({
       amount: billing.amount,
@@ -213,7 +328,7 @@ export async function getBillingSummary(userId: number): Promise<BillingSummary>
 
   for (const row of rows) {
     invoiceCount++;
-    const amount = row.amount;
+    const amount = Number(row.amount);
 
     switch (row.status as InvoiceStatus) {
       case 'paid':
@@ -228,7 +343,7 @@ export async function getBillingSummary(userId: number): Promise<BillingSummary>
         totalCancelled += amount;
         break;
       default:
-        // failed / autres -> tu peux les gérer plus tard si besoin
+        // failed / autres -> à gérer plus tard si besoin
         break;
     }
   }
@@ -243,43 +358,36 @@ export async function getBillingSummary(userId: number): Promise<BillingSummary>
   };
 }
 
-export async function deleteInvoice(invoiceId: number): Promise<Billing | null> {
-  // Soft delete facture
-  const now = new Date();
+/**
+ * Total payé ce mois-ci (basé sur la date de paiement réelle).
+ */
+export async function getTotalPaidThisMonth(userId: number): Promise<number> {
+  const start = startOfMonth(new Date());
+  const end = endOfMonth(new Date());
 
-  const [row] = await db
-    .update(billing)
-    .set({
-      deletedAt: now,
-      updatedAt: now,
+  const result = await db
+    .select({
+      total: sql<number>`SUM(${billing.amount})`,
     })
-    .where(eq(billing.id, invoiceId))
-    .returning();
+    .from(billing)
+    .where(
+      and(
+        eq(billing.userId, userId),
+        eq(billing.status, 'paid'),
+        isNull(billing.deletedAt),
+        gte(billing.paidAt, start),
+        lte(billing.paidAt, end)
+      )
+    );
 
-  return row ?? null;
+  const raw = result[0]?.total ?? 0;
+  return Number(raw);
 }
 
-export async function retryPayment(invoiceId: number, options?: {
-  paymentProvider?: string | null;
-  paymentReference?: string | null;
-  metadata?: Record<string, unknown> | null;
-}): Promise<Billing | null> {
-  // Relance un paiement échoué
-
-  const now = new Date();
-
-  const [row] = await db
-    .update(billing)
-    .set({
-      status: 'pending',
-      paidAt: null,
-      paymentReference: null,   // on reset la référence Stripe précédente
-      walletFundsId: null,     // on reset le lien wallet éventuel
-      metadata: options?.metadata ?? null,
-      updatedAt: now,
-    })
-    .where(and(eq(billing.id, invoiceId), isNull(billing.deletedAt)))
-    .returning();
-
-  return row ?? null;
+/**
+ * Stub : facturation mensuelle des proxies.
+ * À implémenter quand on branchera les subscriptions/proxies.
+ */
+export async function createMonthlyInvoice() {
+  // TODO: implémenter la facturation mensuelle des proxies
 }

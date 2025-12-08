@@ -1,154 +1,183 @@
+/* =======================
+ * IMPORTS
+ * ======================= */
+
 import Stripe from 'stripe';
 import { redirect } from 'next/navigation';
-// import { Team } from '@/lib/db/schema';
-import {
-  getUser,
-} from '@/lib/db/queries';
+import { User, users, subscriptions, type Subscription as DbSubscription } from '@/lib/db/schema';
+import { db } from '@/lib/db/drizzle';
+import { getUser } from '@/lib/db/queries';
+import { eq } from 'drizzle-orm';
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-04-30.basil'
-});
+/* =======================
+ * STRIPE FUNCTIONS
+ * ======================= */
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {});
 
-// export async function createCheckoutSession({
-//   team,
-//   priceId
-// }: {
-//   team: Team | null;
-//   priceId: string;
-// }) {
-//   const user = await getUser();
+// Assure qu'un user a bien un customer Stripe, sinon on le crée et on le stocke en DB
+async function ensureStripeCustomerForUser(user: User): Promise<string> {
+  if (user.stripeCustomerId) {
+    return user.stripeCustomerId;
+  }
 
-//   if (!team || !user) {
-//     redirect(`/sign-up?redirect=checkout&priceId=${priceId}`);
-//   }
+  const customer = await stripe.customers.create({
+    email: user.email,
+    name: user.name ?? undefined,
+  });
 
-//   const session = await stripe.checkout.sessions.create({
-//     payment_method_types: ['card'],
-//     line_items: [
-//       {
-//         price: priceId,
-//         quantity: 1
-//       }
-//     ],
-//     mode: 'subscription',
-//     success_url: `${process.env.BASE_URL}/api/stripe/checkout?session_id={CHECKOUT_SESSION_ID}`,
-//     cancel_url: `${process.env.BASE_URL}/pricing`,
-//     customer: team.stripeCustomerId || undefined,
-//     client_reference_id: user.id.toString(),
-//     allow_promotion_codes: true,
-//     subscription_data: {
-//       trial_period_days: 14
-//     }
-//   });
+  await db
+    .update(users)
+    .set({ stripeCustomerId: customer.id })
+    .where(eq(users.id, user.id));
 
-//   redirect(session.url!);
-// }
+  return customer.id;
+}
 
-// export async function createCustomerPortalSession(team: Team) {
-//   if (!team.stripeCustomerId || !team.stripeProductId) {
-//     redirect('/pricing');
-//   }
+/**
+ * Crée une Checkout Session Stripe pour un abonnement basé sur un priceId.
+ * (équivalent de ton ancienne logique "Team", mais maintenant au niveau User.)
+ */
+export async function createCheckoutSession({ priceId }: { priceId: string }) {
+  const user = await getUser();
 
-//   let configuration: Stripe.BillingPortal.Configuration;
-//   const configurations = await stripe.billingPortal.configurations.list();
+  if (!user) {
+    redirect(`/sign-up?redirect=checkout&priceId=${priceId}`);
+  }
 
-//   if (configurations.data.length > 0) {
-//     configuration = configurations.data[0];
-//   } else {
-//     const product = await stripe.products.retrieve(team.stripeProductId);
-//     if (!product.active) {
-//       throw new Error("Team's product is not active in Stripe");
-//     }
+  const customerId = await ensureStripeCustomerForUser(user!);
 
-//     const prices = await stripe.prices.list({
-//       product: product.id,
-//       active: true
-//     });
-//     if (prices.data.length === 0) {
-//       throw new Error("No active prices found for the team's product");
-//     }
+  const session = await stripe.checkout.sessions.create({
+    line_items: [
+      {
+        price: priceId,
+        quantity: 1,
+      },
+    ],
+    mode: 'subscription',
+    success_url: `${process.env.BASE_URL}/api/stripe/checkout?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${process.env.BASE_URL}/pricing`,
+    customer: customerId,
+    client_reference_id: user!.id.toString(),
+    allow_promotion_codes: true,
+    subscription_data: {
+      trial_period_days: 14,
+    },
+  });
 
-//     configuration = await stripe.billingPortal.configurations.create({
-//       business_profile: {
-//         headline: 'Manage your subscription'
-//       },
-//       features: {
-//         subscription_update: {
-//           enabled: true,
-//           default_allowed_updates: ['price', 'quantity', 'promotion_code'],
-//           proration_behavior: 'create_prorations',
-//           products: [
-//             {
-//               product: product.id,
-//               prices: prices.data.map((price) => price.id)
-//             }
-//           ]
-//         },
-//         subscription_cancel: {
-//           enabled: true,
-//           mode: 'at_period_end',
-//           cancellation_reason: {
-//             enabled: true,
-//             options: [
-//               'too_expensive',
-//               'missing_features',
-//               'switched_service',
-//               'unused',
-//               'other'
-//             ]
-//           }
-//         },
-//         payment_method_update: {
-//           enabled: true
-//         }
-//       }
-//     });
-//   }
+  if (!session.url) {
+    throw new Error('Stripe Checkout session has no URL');
+  }
+  redirect(session.url);
+}
 
-//   return stripe.billingPortal.sessions.create({
-//     customer: team.stripeCustomerId,
-//     return_url: `${process.env.BASE_URL}/dashboard`,
-//     configuration: configuration.id
-//   });
-// }
+/**
+ * Crée une session de portail client Stripe pour que l'utilisateur gère son abonnement.
+ */
+export async function createCustomerPortalSession() {
+  const user = await getUser();
 
-// export async function handleSubscriptionChange(
-//   subscription: Stripe.Subscription
-// ) {
-//   const customerId = subscription.customer as string;
-//   const subscriptionId = subscription.id;
-//   const status = subscription.status;
+  if (!user || !user.stripeCustomerId) {
+    redirect('/pricing');
+  }
 
-//   const team = await getTeamByStripeCustomerId(customerId);
+  const portalSession = await stripe.billingPortal.sessions.create({
+    customer: user!.stripeCustomerId as string,
+    return_url: `${process.env.BASE_URL}/dashboard`,
+  });
 
-//   if (!team) {
-//     console.error('Team not found for Stripe customer:', customerId);
-//     return;
-//   }
+  return portalSession;
+}
 
-//   if (status === 'active' || status === 'trialing') {
-//     const plan = subscription.items.data[0]?.plan;
-//     await updateTeamSubscription(team.id, {
-//       stripeSubscriptionId: subscriptionId,
-//       stripeProductId: plan?.product as string,
-//       planName: (plan?.product as Stripe.Product).name,
-//       subscriptionStatus: status
-//     });
-//   } else if (status === 'canceled' || status === 'unpaid') {
-//     await updateTeamSubscription(team.id, {
-//       stripeSubscriptionId: null,
-//       stripeProductId: null,
-//       planName: null,
-//       subscriptionStatus: status
-//     });
-//   }
-// }
+/**
+ * (Stub pour plus tard) Gestion des changements d'abonnement Stripe via webhook.
+ * On le laissera en TODO tant qu'on n'a pas branché ta table `subscriptions`.
+ */
+export async function handleSubscriptionChange(
+  subscription: Stripe.Subscription
+) {
+  const sub = subscription as Stripe.Subscription & {
+    current_period_start?: number | null;
+    current_period_end?: number | null;
+  };
+  const stripeId = subscription.id;
+  const stripeStatus = subscription.status;
+  const now = new Date();
 
+  // 1. Mapper le statut Stripe -> ton enum interne
+  let newStatus: DbSubscription['status'];
+
+  switch (stripeStatus) {
+    case 'trialing':
+    case 'active':
+      newStatus = 'active';
+      break;
+    case 'past_due':
+    case 'unpaid':
+      newStatus = 'past_due';
+      break;
+    case 'canceled':
+      newStatus = 'canceled';
+      break;
+    default:
+      newStatus = 'paused';
+  }
+
+  // 2. Convertir les timestamps Stripe (seconds) en Date JS
+  const currentPeriodStart = sub.current_period_start
+    ? new Date(sub.current_period_start * 1000)
+    : null;
+
+  const currentPeriodEnd = sub.current_period_end
+    ? new Date(sub.current_period_end * 1000)
+    : null;
+
+  // 3. Construire le patch
+  const updatePatch: Partial<DbSubscription> = {
+    status: newStatus,
+    currentPeriodStart,
+    currentPeriodEnd,
+    updatedAt: now,
+  };
+
+  if (newStatus === 'canceled') {
+    updatePatch.canceledAt = now;
+  }
+
+  // 4. Update en BDD
+  const [updated] = await db
+    .update(subscriptions)
+    .set(updatePatch)
+    .where(eq(subscriptions.stripeSubscriptionId, stripeId))
+    .returning();
+
+  if (!updated) {
+    console.error(
+      '[Stripe] Subscription not found in DB for stripeSubscriptionId =',
+      stripeId
+    );
+    return;
+  }
+
+  console.log(
+    '[Stripe] Subscription synced:',
+    stripeId,
+    '->',
+    newStatus
+  );
+  // 5. (Optionnel plus tard) :
+  //    si newStatus === 'canceled' ou 'past_due',
+  //    tu peux ici appeler une fonction du style :
+  //    await disableAllocationsForSubscription(updated.id);
+}
+
+/**
+ * Récupère les prix Stripe (tu peux garder ça pour ta page de pricing).
+ */
 export async function getStripePrices() {
   const prices = await stripe.prices.list({
     expand: ['data.product'],
     active: true,
-    type: 'recurring'
+    type: 'recurring',
   });
 
   return prices.data.map((price) => ({
@@ -158,14 +187,17 @@ export async function getStripePrices() {
     unitAmount: price.unit_amount,
     currency: price.currency,
     interval: price.recurring?.interval,
-    trialPeriodDays: price.recurring?.trial_period_days
+    trialPeriodDays: price.recurring?.trial_period_days,
   }));
 }
 
+/**
+ * Récupère les produits Stripe (pour construire ton pricing).
+ */
 export async function getStripeProducts() {
   const products = await stripe.products.list({
     active: true,
-    expand: ['data.default_price']
+    expand: ['data.default_price'],
   });
 
   return products.data.map((product) => ({
@@ -175,6 +207,6 @@ export async function getStripeProducts() {
     defaultPriceId:
       typeof product.default_price === 'string'
         ? product.default_price
-        : product.default_price?.id
+        : product.default_price?.id,
   }));
 }

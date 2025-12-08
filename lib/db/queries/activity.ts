@@ -21,6 +21,7 @@ import { db } from '../drizzle';
 import {
   activityLogs,
 } from '../schema';
+import { getUser } from '@/lib/db/queries';
 
 
 /* ======================
@@ -28,7 +29,7 @@ import {
  * ====================== */
 
 import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth/session';
+
 
 /* ======================
  * ACTIVITY LOGS/AUDIT
@@ -48,17 +49,15 @@ export async function logActivity(input: {
 }
 
 export async function getActivityLogs() {
-  // Récupère les logs du user courant
-  const sessionCookie = (await cookies()).get('session');
-  if (!sessionCookie) return [];
-
-  const session = await verifyToken(sessionCookie.value);
-  if (!session?.user?.id) return [];
+  const user = await getUser();
+  if (!user) {
+    return [];
+  }
 
   return await db
     .select()
     .from(activityLogs)
-    .where(eq(activityLogs.userId, session.user.id))
+    .where(eq(activityLogs.userId, user.id))
     .orderBy(desc(activityLogs.createdAt))
     .limit(50);
 }

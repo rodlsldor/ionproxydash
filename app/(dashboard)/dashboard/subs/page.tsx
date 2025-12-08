@@ -1,121 +1,276 @@
 'use client';
 
-import { useActionState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Loader2 } from 'lucide-react';
-import { updateAccount } from '@/app/(login)/actions';
-import { User } from '@/lib/db/schema';
+import { useState } from 'react';
 import useSWR from 'swr';
-import { Suspense } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge'; // enlève si tu ne l'as pas
+import { Loader2, XCircle, ChevronDown } from 'lucide-react';
+import type { Subscription } from '@/lib/db/schema';
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-type ActionState = {
-  name?: string;
-  error?: string;
-  success?: string;
+type SubsResponse = {
+  subscriptions: Subscription[];
 };
 
-type AccountFormProps = {
-  state: ActionState;
-  nameValue?: string;
-  emailValue?: string;
-};
+// numeric -> string/number -> affichage propre
+function formatAmount(value: unknown): string {
+  const n =
+    typeof value === 'number'
+      ? value
+      : parseFloat(String(value).replace(',', '.'));
 
-function AccountForm({
-  state,
-  nameValue = '',
-  emailValue = ''
-}: AccountFormProps) {
-  return (
-    <>
-      <div>
-        <Label htmlFor="name" className="mb-2">
-          Name
-        </Label>
-        <Input
-          id="name"
-          name="name"
-          placeholder="Enter your name"
-          defaultValue={state.name || nameValue}
-          required
-        />
-      </div>
-      <div>
-        <Label htmlFor="email" className="mb-2">
-          Email
-        </Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          placeholder="Enter your email"
-          defaultValue={emailValue}
-          required
-        />
-      </div>
-    </>
-  );
+  if (Number.isNaN(n)) {
+    return String(value);
+  }
+  return n.toFixed(2);
 }
 
-function AccountFormWithData({ state }: { state: ActionState }) {
-  const { data: user } = useSWR<User>('/api/user', fetcher);
-  return (
-    <AccountForm
-      state={state}
-      nameValue={user?.name ?? ''}
-      emailValue={user?.email ?? ''}
-    />
+export default function SubscriptionsPage() {
+  const { data, error, isLoading, mutate } = useSWR<SubsResponse>(
+    '/api/dashboard/subs',
+    fetcher
   );
-}
 
-export default function GeneralPage() {
-  const [state, formAction, isPending] = useActionState<ActionState, FormData>(
-    updateAccount,
-    {}
-  );
+  const [cancelLoadingId, setCancelLoadingId] = useState<number | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [openIds, setOpenIds] = useState<Set<number>>(new Set());
+
+  async function handleCancel(
+    subscriptionId: number,
+    options: { atPeriodEnd: boolean }
+  ) {
+    setCancelError(null);
+    setCancelLoadingId(subscriptionId);
+
+    try {
+      const query = new URLSearchParams({
+        id: String(subscriptionId),
+        atPeriodEnd: String(options.atPeriodEnd),
+      });
+
+      const res = await fetch(`/api/dashboard/subs?${query.toString()}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to cancel subscription');
+      }
+
+      await mutate();
+    } catch (err: any) {
+      console.error('Cancel subscription error:', err);
+      setCancelError(err.message || 'Failed to cancel subscription');
+    } finally {
+      setCancelLoadingId(null);
+    }
+  }
 
   return (
     <section className="flex-1 p-4 lg:p-8">
-      <h1 className="text-lg lg:text-2xl font-medium text-gray-900 mb-6">
-        General Settings
+      <h1 className="text-lg lg:text-2xl font-medium mb-6">
+        Subscriptions
       </h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Account Information</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" action={formAction}>
-            <Suspense fallback={<AccountForm state={state} />}>
-              <AccountFormWithData state={state} />
-            </Suspense>
-            {state.error && (
-              <p className="text-red-500 text-sm">{state.error}</p>
-            )}
-            {state.success && (
-              <p className="text-green-500 text-sm">{state.success}</p>
-            )}
-            <Button
-              type="submit"
-              className="bg-orange-500 hover:bg-orange-600 text-white"
-              disabled={isPending}
+      {isLoading && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle>Loading subscriptions...</CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Fetching your subscriptions
+          </CardContent>
+        </Card>
+      )}
+
+      {error && (
+        <Card className="mb-4 border-red-300">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600">
+              <XCircle className="h-4 w-4" />
+              Error
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-red-600">
+              Failed to load subscriptions. Please try again later.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {cancelError && (
+        <p className="mb-4 text-sm text-red-600">{cancelError}</p>
+      )}
+
+      {!isLoading && !error && (!data || data.subscriptions.length === 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>No subscriptions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-gray-600">
+              You do not have any active subscriptions yet.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+      <div className="space-y-4">
+        {data?.subscriptions.map((sub, index) => {
+          const isCanceled = sub.status === 'canceled';
+          const isCanceling = cancelLoadingId === sub.id;
+          const nextBillingDate =
+        sub.currentPeriodEnd ?? sub.cancelAt ?? null;
+          const isOpen = openIds.has(sub.id);
+
+          return (
+        <Card key={sub.id}>
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
+            <div>
+          <CardTitle className="flex items-center gap-3">
+            Subscription #{sub.id}
+            <Badge
+              variant={
+            sub.status === 'active'
+              ? 'default'
+              : sub.status === 'canceled'
+              ? 'destructive'
+              : 'outline'
+              }
             >
-              {isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
+              {sub.status}
+            </Badge>
+          </CardTitle>
+          <p className="mt-1 text-sm text-gray-500">
+            {sub.paymentMethod.toUpperCase()} •{' '}
+            {formatAmount(sub.amountMonthly)} {sub.currency}
+          </p>
+            </div>
+
+            <Button
+          variant="ghost"
+          size="sm"
+          className="flex items-center gap-1 px-2"
+          onClick={() =>
+            setOpenIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(sub.id)) {
+            next.delete(sub.id);
+              } else {
+            next.add(sub.id);
+              }
+              return next;
+            })
+          }
+            >
+          <span>{isOpen ? 'Hide details' : 'Show details'}</span>
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${
+              isOpen ? 'rotate-180' : ''
+            }`}
+          />
+            </Button>
+          </CardHeader>
+
+          <CardContent>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-1 text-sm text-gray-600">
+            {nextBillingDate && (
+              <p>
+            Next billing date:{' '}
+            <span className="font-medium">
+              {new Date(nextBillingDate).toLocaleDateString()}
+            </span>
+              </p>
+            )}
+            {sub.cancelAt && (
+              <p>
+            Scheduled cancellation:{' '}
+            <span className="font-medium">
+              {new Date(sub.cancelAt).toLocaleDateString()}
+            </span>
+              </p>
+            )}
+            {sub.canceledAt && (
+              <p>
+            Canceled on:{' '}
+            <span className="font-medium">
+              {new Date(sub.canceledAt).toLocaleDateString()}
+            </span>
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isCanceled || isCanceling}
+              onClick={() =>
+            handleCancel(sub.id, { atPeriodEnd: true })
+              }
+            >
+              {isCanceling ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Cancelling...
+            </>
               ) : (
-                'Save Changes'
+            'Cancel at period end'
               )}
             </Button>
-          </form>
-        </CardContent>
-      </Card>
+
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={isCanceled || isCanceling}
+              onClick={() =>
+            handleCancel(sub.id, { atPeriodEnd: false })
+              }
+            >
+              {isCanceling ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Cancelling...
+            </>
+              ) : (
+            'Cancel now'
+              )}
+            </Button>
+          </div>
+            </div>
+
+            {isOpen && (
+          <div className="mt-4 border-t pt-4 space-y-2 text-xs text-gray-500">
+            {/* ... tes détails ... */}
+          </div>
+            )}
+          </CardContent>
+        </Card>
+          );
+        })}
+
+        {(data?.subscriptions.length ?? 0) > 0 && (
+          <div className="flex justify-end">
+            <Button
+              className="rounded-2xl text-lg"
+              variant="default"
+              size="lg"
+              onClick={() => window.location.href = '/pricing'}
+            >
+              Subscribe for More !
+            </Button>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
