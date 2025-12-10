@@ -1,14 +1,20 @@
 import Link from 'next/link';
-import { CircleIcon } from 'lucide-react';
+import Image from 'next/image';
 
 export default function NotFound() {
   return (
     <div className="flex items-center justify-center min-h-[100dvh]">
       <div className="max-w-md space-y-8 p-4 text-center">
         <div className="flex justify-center">
-          <CircleIcon className="size-12 text-orange-500" />
+          <Image
+            src = "/images/Icon-Ion-Proxy.png"
+            alt = "Ion Proxy Logo"
+            width = {450}
+            height = {450}
+            priority
+          />
         </div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">
+        <h1 className="text-4xl font-boldtracking-tight">
           Page Not Found
         </h1>
         <p className="text-base text-gray-500">
