@@ -1,35 +1,26 @@
 // app/api/dashboard/overview/route.ts
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/next-auth'; // ton fichier auth.ts / next-auth.ts
 import {
   getTotalPaidThisMonth,
-  getUserByEmail,
   getUserActiveProxies,
   getUserSubscriptions,
   getUserUsageSeries,
 } from '@/lib/db/queries';
+import { requireUserApi } from '@/lib/auth/user';
 
 export async function GET() {
-  // 1) Session Auth.js v5
-  const session = await auth();
-  console.log('SESSION IN OVERVIEW =', session);
-
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  // 2) Récup user DB via l’email
-  const email = session.user.email;
-  const user = await getUserByEmail(email);
+  // 1) User courant via Auth.js + DB
+  const user = await requireUserApi();
 
   if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const now = new Date();
   const from = new Date(now);
   from.setDate(from.getDate() - 90); // 90 jours pour le graph
 
+  // 2) Récup des données liées au user
   const [invoices, subs, activeAllocations, bandwidthSeries] = await Promise.all([
     getTotalPaidThisMonth(user.id),
     getUserSubscriptions(user.id),
@@ -37,12 +28,13 @@ export async function GET() {
     getUserUsageSeries({
       userId: user.id,
       range: { from, to: now },
-      granularity: 'day',
+      granularity: 'day', // ou 'hour' si tu veux plus fin
     }),
   ]);
 
   const sub = subs[0] ?? null;
 
+  // 3) Réponse JSON pour le dashboard
   return NextResponse.json({
     invoices,
     currency: 'USD',

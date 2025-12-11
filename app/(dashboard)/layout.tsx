@@ -46,7 +46,7 @@ function UserMenu() {
   const user = session.user as {
     name?: string | null;
     email?: string | null;
-    image?: string | null;
+    avatarUrl?: string | null;
   };
 
   const initials = (user.name || user.email || '?')
@@ -58,7 +58,7 @@ function UserMenu() {
 
   async function handleSignOut() {
     await nextAuthSignOut({
-      callbackUrl: '/', // redirection après logout
+      callbackUrl: '/',
     });
   }
 
@@ -67,7 +67,7 @@ function UserMenu() {
       <DropdownMenuTrigger asChild>
         <Avatar className="cursor-pointer size-9">
           <AvatarImage
-            src={user.image ?? undefined}
+            src={user.avatarUrl ?? undefined}
             alt={user.name || user.email || 'Profile'}
           />
           <AvatarFallback>{initials}</AvatarFallback>
