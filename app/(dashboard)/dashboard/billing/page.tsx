@@ -1,9 +1,6 @@
-// app/dashboard/page.tsx
-import { requireUser } from '@/lib/auth/user';
+// app/(dashboard)/dashboard/billing/page.tsx
 import BillingPage from './BillingClient';
 
-export default async function DashboardPage() {
-  await requireUser();
-
+export default function Page() {
   return <BillingPage />;
 }

@@ -13,7 +13,9 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import { apiFetcher, apiPost } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
+
 
 /* =======================
  * SKELETONS
@@ -124,36 +126,24 @@ function WalletBalance({ balance }: { balance: number | string | null }) {
                   setLoading(true);
 
                   try {
-                    const res = await fetch('/api/dashboard/funds/checkout', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ amount: value }),
-                    });
+                    const data = await apiPost<{ url: string }>(
+                      '/api/dashboard/funds/checkout',
+                      { amount: value }
+                    );
 
-                    if (!res.ok) {
-                      const err = await res.json().catch(() => null);
-                      throw new Error(err?.error || 'API error');
-                    }
-
-                    const data = await res.json();
-
-                    if (!data.url) {
-                      throw new Error('No Stripe URL returned');
-                    }
+                    if (!data?.url) throw new Error('No Stripe URL returned');
 
                     window.location.href = data.url;
+                    // pas besoin de setLoading(false) ici : on quitte la page
                   } catch (err) {
                     console.error(err);
                     setLoading(false);
-                    setError(
-                      err instanceof Error
-                        ? err.message
-                        : 'Stripe checkout failed. Try again.'
-                    );
+                    setError(err instanceof Error ? err.message : 'Stripe checkout failed. Try again.');
                   }
                 }}
                 className="space-y-4"
               >
+
                 {/* Montants prédéfinis */}
                 <div className="space-y-1">
                   <label className="text-sm font-medium">
@@ -321,7 +311,7 @@ export default function FundsPage() {
       status: string;
       createdAt: string | null;
     }[];
-  }>('/api/dashboard/funds', fetcher);
+  }>('/api/dashboard/funds', apiFetcher);
 
   // Gérer retour Stripe: ?status=success&session_id=xxx
   useEffect(() => {
@@ -331,29 +321,17 @@ export default function FundsPage() {
     if (status === 'success' && sessionId) {
       (async () => {
         try {
-          const res = await fetch('/api/dashboard/funds/confirm', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ sessionId }),
-          });
-
-          if (!res.ok) {
-            const data = await res.json().catch(() => null);
-            console.error('Confirm funds error:', data);
-          }
+          await apiPost<{ ok: true }>('/api/dashboard/funds/confirm', { sessionId });
         } catch (err) {
           console.error('Confirm funds error:', err);
         } finally {
-          // Rafraîchir les données wallet
           mutate('/api/dashboard/funds');
-          // Nettoyer l’URL
           router.replace('/dashboard/funds');
         }
       })();
     }
   }, [searchParams, mutate, router]);
+
 
   return (
     <section className="flex-1 p-4 lg:p-8">

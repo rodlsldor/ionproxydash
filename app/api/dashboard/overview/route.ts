@@ -6,21 +6,15 @@ import {
   getUserSubscriptions,
   getUserUsageSeries,
 } from '@/lib/db/queries';
-import { requireUserApi } from '@/lib/auth/user';
+import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 
-export async function GET() {
-  // 1) User courant via Auth.js + DB
-  const user = await requireUserApi();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+export const GET = withAuthRoute(async (_req, { auth }) => {
+  const { user } = auth;
 
   const now = new Date();
   const from = new Date(now);
-  from.setDate(from.getDate() - 90); // 90 jours pour le graph
+  from.setDate(from.getDate() - 90);
 
-  // 2) Récup des données liées au user
   const [invoices, subs, activeAllocations, bandwidthSeries] = await Promise.all([
     getTotalPaidThisMonth(user.id),
     getUserSubscriptions(user.id),
@@ -28,13 +22,12 @@ export async function GET() {
     getUserUsageSeries({
       userId: user.id,
       range: { from, to: now },
-      granularity: 'day', // ou 'hour' si tu veux plus fin
+      granularity: 'day',
     }),
   ]);
 
   const sub = subs[0] ?? null;
 
-  // 3) Réponse JSON pour le dashboard
   return NextResponse.json({
     invoices,
     currency: 'USD',
@@ -50,12 +43,10 @@ export async function GET() {
     },
     bandwidth: {
       points: bandwidthSeries.map((p) => {
-        const raw = p.bucket as any;
+        const raw = p.bucket as unknown;
 
         const bucketIso =
-          raw instanceof Date
-            ? raw.toISOString()
-            : new Date(raw).toISOString();
+          raw instanceof Date ? raw.toISOString() : new Date(raw as any).toISOString();
 
         return {
           bucket: bucketIso,
@@ -66,4 +57,4 @@ export async function GET() {
       }),
     },
   });
-}
+});

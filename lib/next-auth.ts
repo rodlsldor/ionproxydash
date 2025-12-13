@@ -1,7 +1,6 @@
 // src/lib/next-auth.ts
 
-import NextAuth from 'next-auth';
-import type { Session } from 'next-auth';
+import NextAuth, { type NextAuthConfig } from 'next-auth';
 
 import Google from 'next-auth/providers/google';
 import GitHub from 'next-auth/providers/github';
@@ -17,7 +16,7 @@ import {
   sessions,
   verificationTokens,
 } from '@/lib/db/schema';
-import { comparePasswords } from '@/lib/auth/session';
+import { comparePasswords } from '@/lib/auth/password';
 
 /* =========================
  * DRIZZLE ADAPTER
@@ -34,7 +33,7 @@ const adapter = DrizzleAdapter(db, {
  * CONFIG AUTH.JS
  * ========================= */
 
-export const authConfig = {
+export const authConfig: NextAuthConfig = {
   adapter,
   session: {
     strategy: 'jwt' as const,
@@ -86,6 +85,7 @@ export const authConfig = {
           id: String(user.id),
           email: user.email,
           name: user.name ?? null,
+          image: user.avatarUrl ?? null,
         };
       },
     }),
@@ -95,12 +95,16 @@ export const authConfig = {
   },
   debug: process.env.NODE_ENV === 'development',
   callbacks: {
-    async session(
-      { session, user }: { session: Session; user: any }
-    ) {
-      if (session.user && user) {
-        (session.user as any).id = user.id;
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.picture = user.image ?? token.picture ?? null;
       }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token.id) session.user.id = token.id;
+      session.user.image = token.picture ?? session.user.image ?? null;
       return session;
     },
   },

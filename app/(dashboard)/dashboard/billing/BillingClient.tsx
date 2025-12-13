@@ -9,6 +9,9 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 
+import { apiFetcher } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
+
 const fetcher = (url: string) =>
   fetch(url).then((res) => {
     if (!res.ok) {
@@ -96,9 +99,11 @@ function StatusBadge({ status }: { status: InvoiceStatus }) {
 export default function BillingPage() {
   const { data, error, isLoading } = useSWR<BillingApiResponse>(
     '/api/dashboard/billing',
-    fetcher
+    apiFetcher
   );
-
+  
+  useDashboardAuthGuard(error);
+  
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   const closeModal = () => setSelectedInvoice(null);

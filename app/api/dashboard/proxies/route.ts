@@ -1,19 +1,19 @@
 // app/api/dashboard/proxies/route.ts
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/drizzle';
-import {
-  proxyAllocations,
-  proxies,
-  proxyUsageSamples,
-} from '@/lib/db/schema';
+import { proxyAllocations, proxies, proxyUsageSamples } from '@/lib/db/schema';
 import { and, eq, isNull, gte, lte, sql } from 'drizzle-orm';
-import { getUser } from '@/lib/db/queries';
+import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 
-export async function GET() {
-  const user = await getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+type BandwidthPoint = {
+  bucket: string; // ISO
+  bytesIn: number;
+  bytesOut: number;
+  bytesTotal: number;
+};
+
+export const GET = withAuthRoute(async (_req, { auth }) => {
+  const userId = auth.user.id;
 
   // 1) Proxies alloués à l'utilisateur
   const rows = await db
@@ -33,37 +33,27 @@ export async function GET() {
     })
     .from(proxyAllocations)
     .innerJoin(proxies, eq(proxyAllocations.proxyId, proxies.id))
-    .where(
-      and(
-        eq(proxyAllocations.userId, user.id),
-        isNull(proxies.deletedAt)
-      )
-    );
+    .where(and(eq(proxyAllocations.userId, userId), isNull(proxies.deletedAt)));
 
-  // 2) Bandwidth par proxy (derniers 90 jours, agrégé par jour)
+  const proxyIds = rows.map((r) => r.proxyId);
+
+  // 2) Bandwidth par proxy (90 jours, agrégé par jour) — 1 seule requête
   const now = new Date();
   const from = new Date(now);
   from.setDate(from.getDate() - 90);
 
-  type BandwidthPoint = {
-    bucket: string;
-    bytesIn: number;
-    bytesOut: number;
-    bytesTotal: number;
-  };
-
   const bandwidthByProxy: Record<number, BandwidthPoint[]> = {};
 
-  for (const row of rows) {
-    const proxyId = row.proxyId;
+  // initialise pour que les proxies sans usage aient []
+  for (const id of proxyIds) bandwidthByProxy[id] = [];
 
-    const bucket = sql<Date>`date_trunc('day', ${proxyUsageSamples.ts})`.as(
-      'bucket'
-    );
+  if (proxyIds.length > 0) {
+    const bucketExpr = sql<Date>`date_trunc('day', ${proxyUsageSamples.ts})`.as('bucket');
 
     const usage = await db
       .select({
-        bucket,
+        proxyId: proxyUsageSamples.proxyId,
+        bucket: bucketExpr,
         bytesIn: sql<number>`sum(${proxyUsageSamples.bytesIn})`,
         bytesOut: sql<number>`sum(${proxyUsageSamples.bytesOut})`,
         bytesTotal: sql<number>`sum(${proxyUsageSamples.bytesIn} + ${proxyUsageSamples.bytesOut})`,
@@ -71,28 +61,35 @@ export async function GET() {
       .from(proxyUsageSamples)
       .where(
         and(
-          eq(proxyUsageSamples.proxyId, proxyId),
-          eq(proxyUsageSamples.userId, user.id),
+          eq(proxyUsageSamples.userId, userId),
           gte(proxyUsageSamples.ts, from),
-          lte(proxyUsageSamples.ts, now)
+          lte(proxyUsageSamples.ts, now),
+          sql`${proxyUsageSamples.proxyId} in (${sql.join(
+            proxyIds.map((id) => sql`${id}`),
+            sql`,`
+          )})`
         )
       )
-      .groupBy(bucket)
-      .orderBy(bucket);
+      .groupBy(proxyUsageSamples.proxyId, bucketExpr)
+      .orderBy(proxyUsageSamples.proxyId, bucketExpr);
 
-    bandwidthByProxy[proxyId] = usage.map((u) => ({
-      bucket:
-        u.bucket instanceof Date
-          ? u.bucket.toISOString()
-          : String(u.bucket),
-      bytesIn: Number(u.bytesIn) || 0,
-      bytesOut: Number(u.bytesOut) || 0,
-      bytesTotal: Number(u.bytesTotal) || 0,
-    }));
+    for (const u of usage) {
+      const d = u.bucket instanceof Date ? u.bucket : new Date(u.bucket as any);
+      const bucketIso = Number.isNaN(d.getTime()) ? null : d.toISOString();
+      if (!bucketIso) continue;
+
+      const pid = Number(u.proxyId);
+      (bandwidthByProxy[pid] ??= []).push({
+        bucket: bucketIso,
+        bytesIn: Number(u.bytesIn) || 0,
+        bytesOut: Number(u.bytesOut) || 0,
+        bytesTotal: Number(u.bytesTotal) || 0,
+      });
+    }
   }
 
-  return NextResponse.json({
-    proxies: rows,
-    bandwidthByProxy,
-  });
-}
+  return NextResponse.json(
+    { proxies: rows, bandwidthByProxy },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
+});

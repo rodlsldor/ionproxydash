@@ -31,6 +31,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { apiFetcher } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
 
 
 type DashboardOverview = {
@@ -55,7 +57,6 @@ type DashboardOverview = {
 };
 
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 /* ----------------------------------------
  * SKELETONS
@@ -497,8 +498,10 @@ function ProxiesInUseCard(props: {
 export default function DashboardOverviewClient() {
   const { data, error, isLoading } = useSWR<DashboardOverview>(
     '/api/dashboard/overview',
-    fetcher
+    apiFetcher
   );
+
+  useDashboardAuthGuard(error);
 
   const isErrored = !!error;
 

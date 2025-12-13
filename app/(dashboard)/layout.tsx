@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { signOut as nextAuthSignOut, useSession } from 'next-auth/react';
+
+import { signOut as nextAuthSignOut } from 'next-auth/react';
 
 import { Button } from '@/components/ui/button';
 import { Home, LogOut } from 'lucide-react';
@@ -17,23 +17,26 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import Image from 'next/image';
 
+import { apiFetcher } from '@/lib/api/fetcher';
+import useSWR from 'swr';
+
+
 function UserMenu() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { data: session, status } = useSession();
-  const router = useRouter();
 
-  // Pas connecté → bouton Sign In + Pricing
-  if (status === 'loading') {
-    return null; // ou un skeleton léger si tu veux
-  }
+  const { data, error, isLoading } = useSWR<{ user: {
+    email: string | null;
+    name: string | null;
+    avatarUrl: string | null;
+  } }>("/api/layout", apiFetcher);
 
-  if (status === 'unauthenticated' || !session?.user) {
+  if (isLoading) return null;
+
+  // pas connecté -> 401 -> on affiche Pricing + Sign in
+  if (error) {
     return (
       <>
-        <Link
-          href="/pricing"
-          className="text-sm font-medium text-muted-foreground hover:text-foreground"
-        >
+        <Link href="/pricing" className="text-sm font-medium text-muted-foreground hover:text-foreground">
           Pricing
         </Link>
         <Button asChild className="rounded-full">
@@ -43,23 +46,16 @@ function UserMenu() {
     );
   }
 
-  const user = session.user as {
-    name?: string | null;
-    email?: string | null;
-    avatarUrl?: string | null;
-  };
-
-  const initials = (user.name || user.email || '?')
-    .split(' ')
+  const user = data?.user;
+  const initials = (user?.name || user?.email || "?")
+    .split(" ")
     .filter(Boolean)
     .map((n) => n[0])
-    .join('')
+    .join("")
     .toUpperCase();
 
   async function handleSignOut() {
-    await nextAuthSignOut({
-      callbackUrl: '/',
-    });
+    await nextAuthSignOut({ callbackUrl: "/" });
   }
 
   return (
@@ -67,17 +63,16 @@ function UserMenu() {
       <DropdownMenuTrigger asChild>
         <Avatar className="cursor-pointer size-9">
           <AvatarImage
-            src={user.avatarUrl ?? undefined}
-            alt={user.name || user.email || 'Profile'}
+            src={user?.avatarUrl ?? undefined}
+            alt={user?.name || user?.email || "Profile"}
           />
           <AvatarFallback>{initials}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="flex flex-col gap-1">
-        {/* Header du menu */}
         <div className="px-2 py-1.5 text-sm text-muted-foreground">
-          {user.email}
+          {user?.email}
         </div>
 
         <DropdownMenuItem asChild className="cursor-pointer">
@@ -89,11 +84,7 @@ function UserMenu() {
 
         <DropdownMenuSeparator />
 
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="flex w-full"
-        >
+        <button type="button" onClick={handleSignOut} className="flex w-full">
           <DropdownMenuItem className="w-full flex-1 cursor-pointer text-red-600">
             <LogOut className="mr-2 h-4 w-4" />
             <span>Sign out</span>
@@ -108,13 +99,15 @@ function Header() {
   return (
     <header className="border-b">
       <div className="flex w-full items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        <Image
-          src="/images/Logo-Ion-Proxy.png"
-          alt="Ion Proxy Logo"
-          width={150}
-          height={50}
-          priority
-        />
+        <a href='/'>
+          <Image
+            src="/images/Logo-Ion-Proxy.png"
+            alt="Ion Proxy Logo"
+            width={150}
+            height={50}
+            priority
+          />
+        </a>
         <div className="flex items-center space-x-4">
           <UserMenu />
         </div>

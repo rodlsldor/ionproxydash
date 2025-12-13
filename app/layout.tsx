@@ -1,8 +1,7 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Lexend_Deca } from 'next/font/google';
-import { AuthSessionProvider } from '@/components/auth/session-provider';
-// import { getUser, getTeamForUser } from '@/lib/db/queries';
+import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: 'Home - Ion Proxy DEV',
@@ -18,17 +17,13 @@ const lexend = Lexend_Deca({
   weight: ['300'],
 });
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className={`min-h-[100dvh] ${lexend.className}`}>
-        <AuthSessionProvider>
+        <Providers>
           {children}
-        </AuthSessionProvider>
+        </Providers>
       </body>
     </html>
   );

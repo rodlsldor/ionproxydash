@@ -23,7 +23,10 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useState } from 'react';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import { apiFetcher, apiPost } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
+import { useSWRConfig } from 'swr'; // pour mutate après création
+
 
 
 /* =======================
@@ -341,6 +344,7 @@ function NeedHelp() {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+    const { mutate } = useSWRConfig();
 
     if (!subject.trim() || !message.trim()) {
       setError('Please fill in both subject and message.');
@@ -349,31 +353,25 @@ function NeedHelp() {
 
     try {
       setLoading(true);
-      const res = await fetch('/api/dashboard/help', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject,
-          message,
-          // tu pourras ajouter category, priority, etc. plus tard
-        }),
-      });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to create ticket.');
-      }
+      await apiPost('/api/dashboard/help', {
+        subject,
+        message,
+        // priority, category si tu ajoutes des states
+      });
 
       setSuccess('Ticket created successfully ✅');
       setSubject('');
       setMessage('');
-      // Tu peux aussi fermer la modal après un petit délai
-      // setOpen(false);
-    } catch (err: any) {
-      setError(err.message || 'Unexpected error.');
+
+      mutate('/api/dashboard/help'); // refresh la liste
+      // option: setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unexpected error.');
     } finally {
       setLoading(false);
     }
+
   }
 
   return (
@@ -496,8 +494,10 @@ export default function HelpPage() {
 
   const { data, error, isLoading } = useSWR<{ tickets: Ticket[] }>(
     '/api/dashboard/help',
-    fetcher
+    apiFetcher
   );
+
+  useDashboardAuthGuard(error);
 
   let openTickets = 0;
   let closedTickets = 0;

@@ -1,30 +1,20 @@
 // app/api/dashboard/profile/route.ts
 import { NextResponse } from 'next/server';
 
-import { getUser } from '@/lib/db/queries';
+import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import {
   getKycStatusForUser,
   getLatestIdentityVerificationForUser,
-} from '@/lib/db/queries'; // adapte le chemin si besoin
+} from '@/lib/db/queries';
 
-export async function GET() {
-  // 1. Récupération utilisateur via cookie
-  const user = await getUser();
+export const GET = withAuthRoute(async (_req, { auth }) => {
+  const user = auth.user;
 
-  if (!user) {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    );
-  }
-
-  // 2. KYC
   const [kycStatus, latestKyc] = await Promise.all([
     getKycStatusForUser(user.id),
     getLatestIdentityVerificationForUser(user.id),
   ]);
 
-  // 3. On enlève les champs sensibles
   const {
     passwordHash,
     failedLoginAttempts,
@@ -33,10 +23,12 @@ export async function GET() {
     ...safeUser
   } = user;
 
-  // 4. Réponse API
-  return NextResponse.json({
-    user: safeUser,
-    kyc: kycStatus,
-    latestIdentityVerification: latestKyc,
-  });
-}
+  return NextResponse.json(
+    {
+      user: safeUser,
+      kyc: kycStatus,
+      latestIdentityVerification: latestKyc,
+    },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
+});

@@ -13,12 +13,15 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 
-// ⚠️ Adapte le chemin si besoin
 import {
   updateAccount,
   updatePassword,
   deleteAccount,
 } from '@/lib/auth/actions';
+
+import { apiFetcher } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
+
 
 type AccountState = {
   name?: string;
@@ -50,8 +53,6 @@ type DeleteState = {
 const initialAccountState: AccountState = {};
 const initialPasswordState: PasswordState = {};
 const initialDeleteState: DeleteState = {};
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 type ProfileResponse = {
   user: {
@@ -110,9 +111,11 @@ function KycBadge({ status, level }: { status: ProfileResponse['kyc']['status'];
 export default function ProfilePage() {
   const { data, error, isLoading } = useSWR<ProfileResponse>(
     '/api/dashboard/profile',
-    fetcher
+    apiFetcher
   );
 
+  useDashboardAuthGuard(error);
+  
   const [accountState, accountAction] = useActionState<AccountState, FormData>(
     updateAccount as unknown as (
       state: AccountState,

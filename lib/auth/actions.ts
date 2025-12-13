@@ -11,7 +11,7 @@ import {
   type NewActivityLog,
   ActivityType,
 } from '@/lib/db/schema';
-import { hashPassword, comparePasswords } from '@/lib/auth/session';
+import { hashPassword, comparePasswords } from '@/lib/auth/password';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { createCheckoutSession } from '@/lib/payments/stripe';

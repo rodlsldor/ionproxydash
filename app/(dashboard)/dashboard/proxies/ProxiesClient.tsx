@@ -39,6 +39,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+import { apiFetcher } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
+
 type ApiProxy = {
   allocationId: number;
   proxyId: number;
@@ -66,7 +69,6 @@ type ProxiesResponse = {
   bandwidthByProxy: Record<number, BandwidthPoint[]>;
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 function formatDate(value: string | null) {
   if (!value) return 'N/A';
@@ -281,16 +283,17 @@ function ProxyBandwidthChart({ points }: { points: BandwidthPoint[] }) {
 export default function ProxiesPage() {
   const { data, error, isLoading, mutate } = useSWR<ProxiesResponse>(
     '/api/dashboard/proxies',
-    fetcher
+    apiFetcher
   );
+
+  useDashboardAuthGuard(error);
 
   const proxies = data?.proxies ?? [];
   const bandwidthByProxy = data?.bandwidthByProxy ?? {};
 
   // proxy sélectionné pour le chart
-  const [selectedProxyId, setSelectedProxyId] = React.useState<number | null>(
-    proxies.length > 0 ? proxies[0].proxyId : null
-  );
+  const [selectedProxyId, setSelectedProxyId] = React.useState<number | null>(null);
+
 
   React.useEffect(() => {
     if (!proxies.length) {
@@ -457,7 +460,7 @@ export default function ProxiesPage() {
                     >
                       <Card className="flex h-full flex-col justify-between">
                         <CardHeader className="space-y-2 pb-3">
-                          <div className="flex items-center justify_between gap-2">
+                          <div className="flex items-center justify-between gap-2">
                             <CardTitle className="text-base">
                               {proxy.label ?? `Proxy #${proxy.proxyId}`}
                             </CardTitle>

@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge'; // enlève si tu ne l'as pas
 import { Loader2, XCircle, ChevronDown } from 'lucide-react';
 import type { Subscription } from '@/lib/db/schema';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import { apiFetcher, apiDelete } from '@/lib/api/fetcher';
+import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
 
 type SubsResponse = {
   subscriptions: Subscription[];
@@ -35,8 +36,10 @@ function formatAmount(value: unknown): string {
 export default function SubscriptionsPage() {
   const { data, error, isLoading, mutate } = useSWR<SubsResponse>(
     '/api/dashboard/subs',
-    fetcher
+    apiFetcher
   );
+
+  useDashboardAuthGuard(error);
 
   const [cancelLoadingId, setCancelLoadingId] = useState<number | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -55,22 +58,18 @@ export default function SubscriptionsPage() {
         atPeriodEnd: String(options.atPeriodEnd),
       });
 
-      const res = await fetch(`/api/dashboard/subs?${query.toString()}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to cancel subscription');
-      }
+      await apiDelete<{ subscription: Subscription }>(
+        `/api/dashboard/subs?${query.toString()}`
+      );
 
       await mutate();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Cancel subscription error:', err);
-      setCancelError(err.message || 'Failed to cancel subscription');
+      setCancelError(err instanceof Error ? err.message : 'Failed to cancel subscription');
     } finally {
       setCancelLoadingId(null);
     }
+
   }
 
   return (

@@ -1,7 +1,8 @@
 // app/api/dashboard/help/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getUser } from '@/lib/db/queries';
+
+import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import {
   createTicket,
   getUserTickets,
@@ -15,12 +16,7 @@ const createTicketSchema = z.object({
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
 });
 
-export async function GET(req: NextRequest) {
-  const user = await getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+export const GET = withAuthRoute(async (req, { auth }) => {
   const url = new URL(req.url);
   const statusParam = url.searchParams.get('status');
   const limitParam = url.searchParams.get('limit');
@@ -35,40 +31,31 @@ export async function GET(req: NextRequest) {
   ] as const;
 
   let status: TicketStatus | undefined;
-  if (
-    statusParam &&
-    (allowedStatuses as readonly string[]).includes(statusParam)
-  ) {
+  if (statusParam && (allowedStatuses as readonly string[]).includes(statusParam)) {
     status = statusParam as TicketStatus;
   }
 
   const limit = limitParam ? Number(limitParam) || 50 : 50;
   const offset = offsetParam ? Number(offsetParam) || 0 : 0;
 
-  const tickets = await getUserTickets(user.id, {
-    status,
-    limit,
-    offset,
-  });
+  const tickets = await getUserTickets(auth.user.id, { status, limit, offset });
 
-  return NextResponse.json({ tickets });
-}
+  return NextResponse.json(
+    { tickets },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
+});
 
-export async function POST(req: NextRequest) {
-  const user = await getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+export const POST = withAuthRoute(async (req, { auth }) => {
   const json = await req.json().catch(() => null);
   if (!json) {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 });
   }
 
   const parsed = createTicketSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.errors[0]?.message ?? 'Invalid input' },
+      { error: 'INVALID_INPUT', message: parsed.error.errors[0]?.message ?? 'Invalid input' },
       { status: 400 }
     );
   }
@@ -76,12 +63,15 @@ export async function POST(req: NextRequest) {
   const { subject, message, category, priority } = parsed.data;
 
   const ticket = await createTicket({
-    userId: user.id,
+    userId: auth.user.id,
     subject,
     message,
     category: category ?? null,
     priority: priority ?? 'normal',
   });
 
-  return NextResponse.json(ticket, { status: 201 });
-}
+  return NextResponse.json(ticket, {
+    status: 201,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+});
