@@ -1,9 +1,13 @@
 // app/api/dashboard/funds/confirm/route.ts
-import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import { z } from 'zod';
 
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
-import { getFundsByIdForUser, markFundsCompleted } from '@/lib/db/queries/funds';
+import {
+  getFundsByIdForUser,
+  markFundsCompleted,
+} from '@/lib/db/queries/funds';
+import { apiError, apiSuccess } from '@/lib/api/response';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeSecretKey) {
@@ -14,57 +18,131 @@ const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2025-11-17.clover' as any,
 });
 
-export const POST = withAuthRoute(async (req, { auth }) => {
-  const user = auth.user;
+/* =========================
+ * ZOD SCHEMAS
+ * ========================= */
 
+// Body attendu depuis le frontend
+const confirmSchema = z.object({
+  sessionId: z.string().min(1, 'sessionId is required'),
+});
+
+// Metadata Stripe attendue (SOURCE DE VÉRITÉ)
+const stripeMetadataSchema = z.object({
+  fundsId: z.string().regex(/^\d+$/, 'Invalid fundsId'),
+  userId: z.string().regex(/^\d+$/, 'Invalid userId'),
+});
+
+/* =========================
+ * ROUTE
+ * ========================= */
+
+export const POST = withAuthRoute(async (req, { auth }) => {
   let body: unknown;
+
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid JSON body',
+      { reason: 'INVALID_JSON_BODY' }
+    );
   }
 
-  const sessionId = (body as { sessionId?: string }).sessionId;
-  if (!sessionId || typeof sessionId !== 'string') {
-    return NextResponse.json({ error: 'SESSION_ID_REQUIRED' }, { status: 400 });
+  const parsedBody = confirmSchema.safeParse(body);
+  if (!parsedBody.success) {
+    const issue = parsedBody.error.issues[0];
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid input',
+      {
+        field: issue.path[0],
+        message: issue.message,
+      }
+    );
   }
+
+  const { sessionId } = parsedBody.data;
 
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
     expand: ['payment_intent'],
   });
 
   if (!session || session.payment_status !== 'paid') {
-    return NextResponse.json({ error: 'PAYMENT_NOT_COMPLETED' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Payment not completed',
+      {
+        reason: 'PAYMENT_NOT_COMPLETED',
+        sessionId,
+        paymentStatus: session?.payment_status ?? null,
+      }
+    );
   }
 
-  const metadata = session.metadata ?? {};
-  const fundsId = metadata.fundsId;
-  const metaUserId = metadata.userId;
-
-  if (!fundsId || !metaUserId) {
-    return NextResponse.json({ error: 'MISSING_SESSION_METADATA' }, { status: 400 });
+  const metadataParse = stripeMetadataSchema.safeParse(session.metadata);
+  if (!metadataParse.success) {
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid Stripe session metadata',
+      {
+        reason: 'INVALID_SESSION_METADATA',
+        issues: metadataParse.error.issues,
+        metadata: session.metadata,
+      }
+    );
   }
 
-  if (String(user.id) !== String(metaUserId)) {
-    return NextResponse.json({ error: 'USER_MISMATCH' }, { status: 403 });
+  const { fundsId, userId: metaUserId } = metadataParse.data;
+
+  if (String(auth.user.id) !== metaUserId) {
+    return apiError(
+      'FORBIDDEN',
+      403,
+      'User mismatch',
+      {
+        reason: 'USER_MISMATCH',
+        authUserId: String(auth.user.id),
+        metaUserId,
+      }
+    );
   }
 
-  const fundRow = await getFundsByIdForUser(Number(fundsId), user.id);
+  const fundRow = await getFundsByIdForUser(Number(fundsId), auth.user.id);
   if (!fundRow) {
-    return NextResponse.json({ error: 'FUNDS_RECORD_NOT_FOUND' }, { status: 404 });
+    return apiError(
+      'NOT_FOUND',
+      404,
+      'Funds record not found',
+      {
+        reason: 'FUNDS_RECORD_NOT_FOUND',
+        fundsId: Number(fundsId),
+      }
+    );
   }
 
-  const paymentIntent =
+  // Stripe payment reference (idempotence / audit)
+  const paymentIntentId =
     typeof session.payment_intent === 'string'
       ? session.payment_intent
-      : session.payment_intent?.id;
+      : session.payment_intent?.id ?? session.id;
 
   await markFundsCompleted(fundRow.id, {
-    transactionReference: paymentIntent ?? session.id,
+    transactionReference: paymentIntentId,
   });
 
-  return NextResponse.json(
-    { ok: true },
-    { headers: { 'Cache-Control': 'no-store' } }
+  return apiSuccess(
+    {
+      confirmed: true,
+      fundsId: fundRow.id,
+    },
+    {
+      headers: { 'Cache-Control': 'no-store' },
+    }
   );
 });

@@ -1,4 +1,5 @@
 // src/lib/next-auth.ts
+import "server-only";
 
 import NextAuth, { type NextAuthConfig } from 'next-auth';
 

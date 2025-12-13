@@ -1,11 +1,11 @@
-// app/api/me/route.ts
-import { NextResponse } from "next/server";
-import { withAuthRoute } from "@/lib/auth/withAuthRoute";
+// app/api/layout/route.ts
+import { withAuthRoute } from '@/lib/auth/withAuthRoute';
+import { apiSuccess } from '@/lib/api/response';
 
 export const GET = withAuthRoute(async (_req, { auth }) => {
   const user = auth.user;
 
-  return NextResponse.json(
+  return apiSuccess(
     {
       user: {
         id: user.id,
@@ -14,6 +14,6 @@ export const GET = withAuthRoute(async (_req, { auth }) => {
         avatarUrl: user.avatarUrl ?? null,
       },
     },
-    { headers: { "Cache-Control": "no-store" } }
+    { headers: { 'Cache-Control': 'no-store' } }
   );
 });

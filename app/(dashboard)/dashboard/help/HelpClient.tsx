@@ -27,7 +27,7 @@ import { apiFetcher, apiPost } from '@/lib/api/fetcher';
 import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
 import { useSWRConfig } from 'swr'; // pour mutate après création
 
-
+import { ApiError } from '@/lib/api/fetcher';
 
 /* =======================
  * SKELETONS
@@ -354,7 +354,7 @@ function NeedHelp() {
     try {
       setLoading(true);
 
-      await apiPost('/api/dashboard/help', {
+      await apiPost<void>('/api/dashboard/help', {
         subject,
         message,
         // priority, category si tu ajoutes des states
@@ -367,7 +367,11 @@ function NeedHelp() {
       mutate('/api/dashboard/help'); // refresh la liste
       // option: setOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unexpected error.');
+      if (err instanceof ApiError) {
+        setError(err.message ?? 'Failed to create ticket.');
+      } else {
+        setError('Unexpected error.');
+      }
     } finally {
       setLoading(false);
     }
@@ -484,13 +488,6 @@ function NeedHelp() {
  * ======================= */
 
 export default function HelpPage() {
-  type Ticket = {
-    id: number;
-    subject: string;
-    status: 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
-    priority?: string;
-    createdAt?: string;
-  };
 
   const { data, error, isLoading } = useSWR<{ tickets: Ticket[] }>(
     '/api/dashboard/help',

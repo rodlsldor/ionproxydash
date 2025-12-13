@@ -313,6 +313,8 @@ export default function FundsPage() {
     }[];
   }>('/api/dashboard/funds', apiFetcher);
 
+  useDashboardAuthGuard(error);
+
   // Gérer retour Stripe: ?status=success&session_id=xxx
   useEffect(() => {
     const status = searchParams.get('status');
@@ -321,7 +323,7 @@ export default function FundsPage() {
     if (status === 'success' && sessionId) {
       (async () => {
         try {
-          await apiPost<{ ok: true }>('/api/dashboard/funds/confirm', { sessionId });
+          await apiPost<void>('/api/dashboard/funds/confirm', { sessionId });
         } catch (err) {
           console.error('Confirm funds error:', err);
         } finally {

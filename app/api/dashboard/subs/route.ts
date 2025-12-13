@@ -1,45 +1,79 @@
-// app/api/dashboard/subs/route.ts
-import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
+import { apiError, apiSuccess } from '@/lib/api/response';
+
 import {
   createSubscriptionForProxy,
   getUserSubscriptions,
   cancelSubscription,
   getSubscriptionById,
-  type PaymentMethod,
 } from '@/lib/db/queries';
+
+/* ============================
+ * SCHEMAS
+ * ============================ */
+
+const createSubscriptionSchema = z
+  .object({
+    proxyId: z.number().int().positive(),
+    priceMonthly: z.number().positive(),
+    paymentMethod: z.enum(['stripe', 'wallet']),
+    currency: z.literal('USD'),
+    stripeSubscriptionId: z.string().nullable().optional(),
+    stripePriceId: z.string().nullable().optional(),
+    metadata: z.record(z.unknown()).nullable().optional(),
+  })
+  .strict();
+
+const deleteSubscriptionSchema = z
+  .object({
+    id: z.coerce.number().int().positive(),
+    atPeriodEnd: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => v !== 'false'),
+  })
+  .strict();
 
 /* ============================
  * GET /api/dashboard/subs
  * ============================ */
 export const GET = withAuthRoute(async (_req, { auth }) => {
-  try {
-    const subs = await getUserSubscriptions(auth.user.id);
+  const subs = await getUserSubscriptions(auth.user.id);
 
-    return NextResponse.json(
-      { subscriptions: subs },
-      { headers: { 'Cache-Control': 'no-store' } }
-    );
-  } catch (err) {
-    console.error('[GET /dashboard/subs] error', err);
-    return NextResponse.json(
-      { error: 'FAILED_TO_FETCH_SUBSCRIPTIONS' },
-      { status: 500 }
-    );
-  }
+  return apiSuccess(
+    { subscriptions: subs },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 });
 
 /* ============================
  * POST /api/dashboard/subs
  * ============================ */
 export const POST = withAuthRoute(async (req, { auth }) => {
-  let body: unknown;
+  const json = await req.json().catch(() => null);
+  if (!json) {
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid JSON body',
+      { reason: 'INVALID_JSON_BODY' }
+    );
+  }
 
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 });
+  const parsed = createSubscriptionSchema.safeParse(json);
+  if (!parsed.success) {
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid input',
+      {
+        reason: 'INVALID_INPUT',
+        zod: parsed.error.flatten(),
+        issues: parsed.error.issues,
+      }
+    );
   }
 
   const {
@@ -50,52 +84,43 @@ export const POST = withAuthRoute(async (req, { auth }) => {
     stripeSubscriptionId,
     stripePriceId,
     metadata,
-  } = body as {
-    proxyId?: number;
-    priceMonthly?: number;
-    paymentMethod?: PaymentMethod;
-    currency?: string;
-    stripeSubscriptionId?: string | null;
-    stripePriceId?: string | null;
-    metadata?: Record<string, unknown> | null;
-  };
-
-  if (typeof proxyId !== 'number' || Number.isNaN(proxyId)) {
-    return NextResponse.json({ error: 'INVALID_PROXY_ID' }, { status: 400 });
-  }
-
-  if (typeof priceMonthly !== 'number' || priceMonthly <= 0) {
-    return NextResponse.json({ error: 'INVALID_PRICE_MONTHLY' }, { status: 400 });
-  }
-
-  if (paymentMethod !== 'stripe' && paymentMethod !== 'wallet') {
-    return NextResponse.json({ error: 'INVALID_PAYMENT_METHOD' }, { status: 400 });
-  }
+  } = parsed.data;
 
   try {
-    const { subscription, allocation } = await createSubscriptionForProxy({
-      userId: auth.user.id,
-      proxyId,
-      priceMonthly,
-      currency,
-      paymentMethod,
-      stripeSubscriptionId: stripeSubscriptionId ?? null,
-      stripePriceId: stripePriceId ?? null,
-      metadata: metadata ?? null,
-    });
+    const { subscription, allocation } =
+      await createSubscriptionForProxy({
+        userId: auth.user.id,
+        proxyId,
+        priceMonthly,
+        currency,
+        paymentMethod,
+        stripeSubscriptionId: stripeSubscriptionId ?? null,
+        stripePriceId: stripePriceId ?? null,
+        metadata: metadata ?? null,
+      });
 
-    return NextResponse.json(
+    return apiSuccess(
       { subscription, allocation },
       { status: 201, headers: { 'Cache-Control': 'no-store' } }
     );
-  } catch (err: any) {
-    console.error('[POST /dashboard/subs] error', err);
-
+  } catch (err) {
     if (err instanceof Error && err.message === 'Proxy is not available') {
-      return NextResponse.json({ error: 'PROXY_NOT_AVAILABLE' }, { status: 409 });
+      return apiError(
+        'VALIDATION_ERROR',
+        409,
+        'Proxy not available',
+        { reason: 'PROXY_NOT_AVAILABLE', proxyId }
+      );
     }
 
-    return NextResponse.json({ error: 'FAILED_TO_CREATE_SUBSCRIPTION' }, { status: 500 });
+    console.error('[POST /api/dashboard/subs]', err);
+
+    return apiError(
+      'INTERNAL',
+      500,
+      'Failed to create subscription',
+      { reason: 'FAILED_TO_CREATE_SUBSCRIPTION' }
+    );
   }
 });
 
@@ -103,41 +128,42 @@ export const POST = withAuthRoute(async (req, { auth }) => {
  * DELETE /api/dashboard/subs?id=123&atPeriodEnd=true|false
  * ============================ */
 export const DELETE = withAuthRoute(async (req, { auth }) => {
-  const { searchParams } = new URL(req.url);
+  const params = Object.fromEntries(new URL(req.url).searchParams);
 
-  const idParam = searchParams.get('id');
-  const atPeriodEndParam = searchParams.get('atPeriodEnd');
-
-  if (!idParam) {
-    return NextResponse.json({ error: 'MISSING_ID' }, { status: 400 });
-  }
-
-  const subscriptionId = Number(idParam);
-  if (Number.isNaN(subscriptionId)) {
-    return NextResponse.json({ error: 'INVALID_ID' }, { status: 400 });
-  }
-
-  const atPeriodEnd =
-    atPeriodEndParam === null
-      ? true
-      : atPeriodEndParam !== 'false';
-
-  try {
-    const sub = await getSubscriptionById(subscriptionId);
-
-    // 404 si pas trouvé OU pas à l'user (pas de leak d'existence)
-    if (!sub || sub.userId !== auth.user.id) {
-      return NextResponse.json({ error: 'SUBSCRIPTION_NOT_FOUND' }, { status: 404 });
-    }
-
-    const updated = await cancelSubscription(subscriptionId, { atPeriodEnd });
-
-    return NextResponse.json(
-      { subscription: updated },
-      { headers: { 'Cache-Control': 'no-store' } }
+  const parsed = deleteSubscriptionSchema.safeParse(params);
+  if (!parsed.success) {
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid query parameters',
+      {
+        reason: 'INVALID_QUERY',
+        zod: parsed.error.flatten(),
+        issues: parsed.error.issues,
+      }
     );
-  } catch (err) {
-    console.error('[DELETE /dashboard/subs] error', err);
-    return NextResponse.json({ error: 'FAILED_TO_CANCEL_SUBSCRIPTION' }, { status: 500 });
   }
+
+  const { id: subscriptionId, atPeriodEnd } = parsed.data;
+
+  const sub = await getSubscriptionById(subscriptionId);
+
+  // Pas de leak d'existence
+  if (!sub || sub.userId !== auth.user.id) {
+    return apiError(
+      'NOT_FOUND',
+      404,
+      'Subscription not found',
+      { reason: 'SUBSCRIPTION_NOT_FOUND', subscriptionId }
+    );
+  }
+
+  const updated = await cancelSubscription(subscriptionId, {
+    atPeriodEnd,
+  });
+
+  return apiSuccess(
+    { subscription: updated },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 });

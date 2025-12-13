@@ -1,3 +1,4 @@
+import 'server-only';
 export * from './users';
 export * from './proxy';
 export * from './allocations';

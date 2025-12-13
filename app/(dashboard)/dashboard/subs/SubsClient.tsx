@@ -11,13 +11,25 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge'; // enlève si tu ne l'as pas
 import { Loader2, XCircle, ChevronDown } from 'lucide-react';
-import type { Subscription } from '@/lib/db/schema';
 
 import { apiFetcher, apiDelete } from '@/lib/api/fetcher';
 import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
 
+import { ApiError } from '@/lib/api/fetcher';
+
+type ApiSubscription = {
+  id: number;
+  status: 'active' | 'canceled' | 'paused';
+  paymentMethod: 'stripe' | 'wallet';
+  amountMonthly: number;
+  currency: string;
+  currentPeriodEnd: string | null;
+  cancelAt: string | null;
+  canceledAt: string | null;
+};
+
 type SubsResponse = {
-  subscriptions: Subscription[];
+  subscriptions: ApiSubscription[];
 };
 
 // numeric -> string/number -> affichage propre
@@ -58,19 +70,22 @@ export default function SubscriptionsPage() {
         atPeriodEnd: String(options.atPeriodEnd),
       });
 
-      await apiDelete<{ subscription: Subscription }>(
+      await apiDelete<{ subscription: ApiSubscription }>(
         `/api/dashboard/subs?${query.toString()}`
       );
 
       await mutate();
     } catch (err) {
-      console.error('Cancel subscription error:', err);
-      setCancelError(err instanceof Error ? err.message : 'Failed to cancel subscription');
+      if (err instanceof ApiError) {
+        setCancelError(err.message ?? err.code);
+      } else {
+        setCancelError('FAILED_TO_CANCEL_SUBSCRIPTION');
+      }
     } finally {
       setCancelLoadingId(null);
     }
-
   }
+
 
   return (
     <section className="flex-1 p-4 lg:p-8">

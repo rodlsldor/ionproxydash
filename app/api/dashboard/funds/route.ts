@@ -1,8 +1,7 @@
 // app/api/dashboard/funds/route.ts
-import { NextResponse } from 'next/server';
-
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import { getUserBalance, getFundsHistory } from '@/lib/db/queries/funds';
+import { apiSuccess } from '@/lib/api/response';
 
 export const GET = withAuthRoute(async (_req, { auth }) => {
   const userId = auth.user.id;
@@ -24,7 +23,7 @@ export const GET = withAuthRoute(async (_req, { auth }) => {
     createdAt: tx.createdAt ? tx.createdAt.toISOString() : null,
   }));
 
-  return NextResponse.json(
+  return apiSuccess(
     { balance, transactions },
     { headers: { 'Cache-Control': 'no-store' } }
   );

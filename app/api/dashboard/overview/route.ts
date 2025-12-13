@@ -1,5 +1,4 @@
 // app/api/dashboard/overview/route.ts
-import { NextResponse } from 'next/server';
 import {
   getTotalPaidThisMonth,
   getUserActiveProxies,
@@ -7,6 +6,7 @@ import {
   getUserUsageSeries,
 } from '@/lib/db/queries';
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
+import { apiSuccess } from '@/lib/api/response';
 
 export const GET = withAuthRoute(async (_req, { auth }) => {
   const { user } = auth;
@@ -28,33 +28,38 @@ export const GET = withAuthRoute(async (_req, { auth }) => {
 
   const sub = subs[0] ?? null;
 
-  return NextResponse.json({
-    invoices,
-    currency: 'USD',
-    activeSubscription: sub
-      ? {
-          nbSubs: subs.length,
-          nextInvoiceAt: sub.currentPeriodEnd,
-        }
-      : null,
-    proxiesInUse: {
-      active: activeAllocations.length,
-      total: null,
-    },
-    bandwidth: {
-      points: bandwidthSeries.map((p) => {
-        const raw = p.bucket as unknown;
+  return apiSuccess(
+    {
+      invoices,
+      currency: 'USD',
+      activeSubscription: sub
+        ? {
+            nbSubs: subs.length,
+            nextInvoiceAt: sub.currentPeriodEnd,
+          }
+        : null,
+      proxiesInUse: {
+        active: activeAllocations.length,
+        total: null,
+      },
+      bandwidth: {
+        points: bandwidthSeries.map((p) => {
+          const raw = p.bucket as unknown;
 
-        const bucketIso =
-          raw instanceof Date ? raw.toISOString() : new Date(raw as any).toISOString();
+          const bucketIso =
+            raw instanceof Date
+              ? raw.toISOString()
+              : new Date(raw as any).toISOString();
 
-        return {
-          bucket: bucketIso,
-          bytesIn: p.bytesIn,
-          bytesOut: p.bytesOut,
-          bytesTotal: p.bytesTotal,
-        };
-      }),
+          return {
+            bucket: bucketIso,
+            bytesIn: p.bytesIn,
+            bytesOut: p.bytesOut,
+            bytesTotal: p.bytesTotal,
+          };
+        }),
+      },
     },
-  });
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 });

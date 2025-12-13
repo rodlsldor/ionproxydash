@@ -1,5 +1,4 @@
 // app/api/dashboard/help/route.ts
-import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
@@ -8,7 +7,13 @@ import {
   getUserTickets,
   type TicketStatus,
 } from '@/lib/db/queries/tickets';
+import { apiError, apiSuccess } from '@/lib/api/response';
 
+/* ============================
+ * ZOD SCHEMAS
+ * ============================ */
+
+// POST body
 const createTicketSchema = z.object({
   subject: z.string().min(3).max(255),
   message: z.string().min(5),
@@ -16,47 +21,87 @@ const createTicketSchema = z.object({
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
 });
 
+// GET query
+const listTicketsQuerySchema = z.object({
+  status: z
+    .enum(['open', 'in_progress', 'waiting', 'resolved', 'closed'])
+    .optional(),
+
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(50),
+
+  offset: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(0),
+});
+
+/* ============================
+ * GET /dashboard/help
+ * ============================ */
+
 export const GET = withAuthRoute(async (req, { auth }) => {
-  const url = new URL(req.url);
-  const statusParam = url.searchParams.get('status');
-  const limitParam = url.searchParams.get('limit');
-  const offsetParam = url.searchParams.get('offset');
+  const query = Object.fromEntries(new URL(req.url).searchParams);
 
-  const allowedStatuses = [
-    'open',
-    'in_progress',
-    'waiting',
-    'resolved',
-    'closed',
-  ] as const;
-
-  let status: TicketStatus | undefined;
-  if (statusParam && (allowedStatuses as readonly string[]).includes(statusParam)) {
-    status = statusParam as TicketStatus;
+  const parsed = listTicketsQuerySchema.safeParse(query);
+  if (!parsed.success) {
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid query parameters',
+      {
+        reason: 'INVALID_QUERY',
+        zod: parsed.error.flatten(),
+        issues: parsed.error.issues,
+      }
+    );
   }
 
-  const limit = limitParam ? Number(limitParam) || 50 : 50;
-  const offset = offsetParam ? Number(offsetParam) || 0 : 0;
+  const { status, limit, offset } = parsed.data;
 
-  const tickets = await getUserTickets(auth.user.id, { status, limit, offset });
+  const tickets = await getUserTickets(auth.user.id, {
+    status: status as TicketStatus | undefined,
+    limit,
+    offset,
+  });
 
-  return NextResponse.json(
+  return apiSuccess(
     { tickets },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 });
 
+/* ============================
+ * POST /dashboard/help
+ * ============================ */
+
 export const POST = withAuthRoute(async (req, { auth }) => {
   const json = await req.json().catch(() => null);
   if (!json) {
-    return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid JSON body',
+      { reason: 'INVALID_JSON_BODY' }
+    );
   }
 
   const parsed = createTicketSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'INVALID_INPUT', message: parsed.error.errors[0]?.message ?? 'Invalid input' },
-      { status: 400 }
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid input',
+      {
+        reason: 'INVALID_INPUT',
+        zod: parsed.error.flatten(),
+        issues: parsed.error.issues,
+      }
     );
   }
 
@@ -70,8 +115,11 @@ export const POST = withAuthRoute(async (req, { auth }) => {
     priority: priority ?? 'normal',
   });
 
-  return NextResponse.json(ticket, {
-    status: 201,
-    headers: { 'Cache-Control': 'no-store' },
-  });
+  return apiSuccess(
+    { ticket },
+    {
+      status: 201,
+      headers: { 'Cache-Control': 'no-store' },
+    }
+  );
 });

@@ -1,24 +1,63 @@
 // lib/api/fetcher.ts
 export class ApiError extends Error {
   status: number;
-  data?: any;
+  code: string;
+  details?: unknown;
+  data?: unknown;
 
-  constructor(message: string, status: number, data?: any) {
-    super(message);
-    this.status = status;
-    this.data = data;
+  constructor(opts: {
+    code: string;
+    status: number;
+    message?: string;
+    details?: unknown;
+    data?: unknown;
+  }) {
+    super(opts.message ?? opts.code);
+    this.code = opts.code;
+    this.status = opts.status;
+    this.details = opts.details;
+    this.data = opts.data;
   }
+}
+
+type ApiOk<T> = { ok: true; data: T };
+type ApiKo = { ok: false; error: { code: string; message?: string; details?: unknown } };
+type ApiResponse<T> = ApiOk<T> | ApiKo;
+
+function assertApiEnvelope(x: any): x is { ok: boolean } {
+  return x && typeof x === 'object' && typeof x.ok === 'boolean';
+}
+
+async function parseApiResponse<T>(res: Response): Promise<T> {
+  const json = await res.json().catch(() => null);
+
+  // Si la route ne respecte pas le contrat, tu le vois tout de suite
+  if (!assertApiEnvelope(json)) {
+    throw new ApiError({
+      code: 'INVALID_API_RESPONSE',
+      status: res.status,
+      message: 'API response is not normalized (missing { ok })',
+      data: json,
+    });
+  }
+
+  if (json.ok) {
+    return (json as ApiOk<T>).data;
+  }
+
+  const err = (json as ApiKo).error;
+  throw new ApiError({
+    code: err.code ?? 'REQUEST_FAILED',
+    status: res.status,
+    message: err.message,
+    details: err.details,
+    data: json,
+  });
 }
 
 export async function apiFetcher<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: 'include' });
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    throw new ApiError(data?.error ?? 'REQUEST_FAILED', res.status, data);
-  }
-
-  return data as T;
+  return parseApiResponse<T>(res);
 }
 
 export async function apiPost<T>(url: string, body: unknown): Promise<T> {
@@ -28,14 +67,7 @@ export async function apiPost<T>(url: string, body: unknown): Promise<T> {
     credentials: 'include',
     body: JSON.stringify(body),
   });
-
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    throw new ApiError(data?.error ?? 'REQUEST_FAILED', res.status, data);
-  }
-
-  return data as T;
+  return parseApiResponse<T>(res);
 }
 
 export async function apiDelete<T>(url: string): Promise<T> {
@@ -43,12 +75,5 @@ export async function apiDelete<T>(url: string): Promise<T> {
     method: 'DELETE',
     credentials: 'include',
   });
-
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    throw new ApiError(data?.error ?? 'REQUEST_FAILED', res.status, data);
-  }
-
-  return data as T;
+  return parseApiResponse<T>(res);
 }
