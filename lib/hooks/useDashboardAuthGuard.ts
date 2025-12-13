@@ -11,15 +11,18 @@ export function useDashboardAuthGuard(error: unknown) {
   React.useEffect(() => {
     if (!error) return;
 
-    const e = error as ApiError;
+    if (!(error instanceof ApiError)) return;
 
-    if (e.status === 401) {
+    // Auth expirée / non connecté
+    if (error.code === 'UNAUTHORIZED') {
       router.replace('/'); // ou /auth/signin
       return;
     }
 
-    if (e.status === 403 && e.data?.error === 'FORBIDDEN') {
+    // Compte bloqué / supprimé
+    if (error.code === 'FORBIDDEN') {
       router.replace('/account/locked');
+      return;
     }
   }, [error, router]);
 }

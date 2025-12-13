@@ -1,11 +1,10 @@
 // app/api/dashboard/profile/route.ts
-import { NextResponse } from 'next/server';
-
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import {
   getKycStatusForUser,
   getLatestIdentityVerificationForUser,
 } from '@/lib/db/queries';
+import { apiSuccess } from '@/lib/api/response';
 
 export const GET = withAuthRoute(async (_req, { auth }) => {
   const user = auth.user;
@@ -23,7 +22,7 @@ export const GET = withAuthRoute(async (_req, { auth }) => {
     ...safeUser
   } = user;
 
-  return NextResponse.json(
+  return apiSuccess(
     {
       user: safeUser,
       kyc: kycStatus,

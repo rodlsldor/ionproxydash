@@ -1,5 +1,4 @@
 // app/api/dashboard/help/route.ts
-import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
@@ -8,6 +7,7 @@ import {
   getUserTickets,
   type TicketStatus,
 } from '@/lib/db/queries/tickets';
+import { apiError, apiSuccess } from '@/lib/api/response';
 
 const createTicketSchema = z.object({
   subject: z.string().min(3).max(255),
@@ -40,7 +40,7 @@ export const GET = withAuthRoute(async (req, { auth }) => {
 
   const tickets = await getUserTickets(auth.user.id, { status, limit, offset });
 
-  return NextResponse.json(
+  return apiSuccess(
     { tickets },
     { headers: { 'Cache-Control': 'no-store' } }
   );
@@ -49,14 +49,25 @@ export const GET = withAuthRoute(async (req, { auth }) => {
 export const POST = withAuthRoute(async (req, { auth }) => {
   const json = await req.json().catch(() => null);
   if (!json) {
-    return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid JSON body',
+      { reason: 'INVALID_JSON_BODY' }
+    );
   }
 
   const parsed = createTicketSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'INVALID_INPUT', message: parsed.error.errors[0]?.message ?? 'Invalid input' },
-      { status: 400 }
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid input',
+      {
+        reason: 'INVALID_INPUT',
+        zod: parsed.error.flatten(),
+        issues: parsed.error.issues,
+      }
     );
   }
 
@@ -70,8 +81,11 @@ export const POST = withAuthRoute(async (req, { auth }) => {
     priority: priority ?? 'normal',
   });
 
-  return NextResponse.json(ticket, {
-    status: 201,
-    headers: { 'Cache-Control': 'no-store' },
-  });
+  return apiSuccess(
+    { ticket },
+    {
+      status: 201,
+      headers: { 'Cache-Control': 'no-store' },
+    }
+  );
 });

@@ -1,9 +1,9 @@
 // app/api/dashboard/funds/confirm/route.ts
-import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import { getFundsByIdForUser, markFundsCompleted } from '@/lib/db/queries/funds';
+import { apiError, apiSuccess } from '@/lib/api/response';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeSecretKey) {
@@ -17,16 +17,24 @@ const stripe = new Stripe(stripeSecretKey, {
 export const POST = withAuthRoute(async (req, { auth }) => {
   const user = auth.user;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'INVALID_JSON_BODY' }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  if (!body) {
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Invalid JSON body',
+      { reason: 'INVALID_JSON_BODY' }
+    );
   }
 
   const sessionId = (body as { sessionId?: string }).sessionId;
   if (!sessionId || typeof sessionId !== 'string') {
-    return NextResponse.json({ error: 'SESSION_ID_REQUIRED' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'sessionId is required',
+      { field: 'sessionId', reason: 'SESSION_ID_REQUIRED' }
+    );
   }
 
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -34,7 +42,12 @@ export const POST = withAuthRoute(async (req, { auth }) => {
   });
 
   if (!session || session.payment_status !== 'paid') {
-    return NextResponse.json({ error: 'PAYMENT_NOT_COMPLETED' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Payment not completed',
+      { reason: 'PAYMENT_NOT_COMPLETED', sessionId }
+    );
   }
 
   const metadata = session.metadata ?? {};
@@ -42,16 +55,31 @@ export const POST = withAuthRoute(async (req, { auth }) => {
   const metaUserId = metadata.userId;
 
   if (!fundsId || !metaUserId) {
-    return NextResponse.json({ error: 'MISSING_SESSION_METADATA' }, { status: 400 });
+    return apiError(
+      'VALIDATION_ERROR',
+      400,
+      'Missing checkout session metadata',
+      { reason: 'MISSING_SESSION_METADATA', metadata }
+    );
   }
 
   if (String(user.id) !== String(metaUserId)) {
-    return NextResponse.json({ error: 'USER_MISMATCH' }, { status: 403 });
+    return apiError(
+      'FORBIDDEN',
+      403,
+      'User mismatch',
+      { reason: 'USER_MISMATCH', metaUserId, userId: String(user.id) }
+    );
   }
 
   const fundRow = await getFundsByIdForUser(Number(fundsId), user.id);
   if (!fundRow) {
-    return NextResponse.json({ error: 'FUNDS_RECORD_NOT_FOUND' }, { status: 404 });
+    return apiError(
+      'NOT_FOUND',
+      404,
+      'Funds record not found',
+      { reason: 'FUNDS_RECORD_NOT_FOUND', fundsId: Number(fundsId) }
+    );
   }
 
   const paymentIntent =
@@ -63,8 +91,8 @@ export const POST = withAuthRoute(async (req, { auth }) => {
     transactionReference: paymentIntent ?? session.id,
   });
 
-  return NextResponse.json(
-    { ok: true },
+  return apiSuccess(
+    { confirmed: true, fundsId: fundRow.id },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 });

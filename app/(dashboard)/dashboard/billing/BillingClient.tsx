@@ -12,14 +12,6 @@ import {
 import { apiFetcher } from '@/lib/api/fetcher';
 import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
 
-const fetcher = (url: string) =>
-  fetch(url).then((res) => {
-    if (!res.ok) {
-      throw new Error('Failed to fetch billing data');
-    }
-    return res.json();
-  });
-
 type InvoiceStatus = 'pending' | 'paid' | 'cancelled' | 'failed';
 
 type Invoice = {

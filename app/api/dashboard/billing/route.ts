@@ -1,12 +1,11 @@
 // app/api/dashboard/billing/route.ts
-import { NextResponse } from 'next/server';
-
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import {
   getUserInvoices,
   getBillingSummary,
   getTotalPaidThisMonth,
 } from '@/lib/db/queries/billing';
+import { apiSuccess } from '@/lib/api/response';
 
 export const GET = withAuthRoute(async (req, { auth }) => {
   const { user } = auth;
@@ -20,8 +19,16 @@ export const GET = withAuthRoute(async (req, { auth }) => {
     getTotalPaidThisMonth(user.id),
   ]);
 
-  return NextResponse.json(
-    { invoices, summary, paidThisMonth },
-    { headers: { 'Cache-Control': 'no-store' } }
+  return apiSuccess(
+    {
+      invoices,
+      summary,
+      paidThisMonth,
+    },
+    {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    }
   );
 });
