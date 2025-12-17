@@ -36,16 +36,23 @@ import { cookies } from 'next/headers';
  * ====================== */
 
 export async function logActivity(input: {
-  userId: number;
+  userId: number | null;
   action: string;
-  ipAddress?: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  metadata?: Record<string, unknown> | null;
 }) {
-  // Enregistre une action dans activity_logs
-  await db.insert(activityLogs).values({
-    userId: input.userId,
-    action: input.action,
-    ipAddress: input.ipAddress ?? null,
-  });
+  try {
+    await db.insert(activityLogs).values({
+      userId: input.userId ?? null,
+      action: input.action,
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+      metadata: input.metadata ?? null,
+    });
+  } catch (e) {
+    console.error('[logActivity] failed', e);
+  }
 }
 
 export async function getActivityLogs() {

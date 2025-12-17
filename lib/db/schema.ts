@@ -17,6 +17,8 @@ import {
   primaryKey,
 } from 'drizzle-orm/pg-core';
 import { relations} from 'drizzle-orm';
+import { userAgent } from 'next/server';
+import { metadata } from '@/app/layout';
 
 /* =========================
  * ENUMS
@@ -369,7 +371,6 @@ export const proxyAllocations = pgTable('proxy_allocations', {
     scale: 2,
   }).notNull()
     .$type<number>(),
-  // 👇 NOUVEAU : l’abo qui finance cette alloc
   subscriptionId: integer('subscription_id').references(
     () => subscriptions.id,
     {
@@ -573,6 +574,8 @@ export const activityLogs = pgTable('activity_logs', {
     .notNull()
     .defaultNow(),
   ipAddress: varchar('ip_address', { length: 45 }),
+  userAgent: text('user_agent'),
+  metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
 });
 
 /* =========================

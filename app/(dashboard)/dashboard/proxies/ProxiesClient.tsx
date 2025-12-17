@@ -8,29 +8,22 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
+  CardFooter
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, MapPin, Wifi, RefreshCcw } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Loader2, RefreshCcw } from 'lucide-react';
 import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from '@/components/ui/carousel';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-// Chart
-import { Area, AreaChart, CartesianGrid, XAxis } from 'recharts';
-import {
-  ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-} from '@/components/ui/chart';
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -39,8 +32,47 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+import { X } from "lucide-react";
+
+import { useRouter } from 'next/navigation';
 import { apiFetcher } from '@/lib/api/fetcher';
 import { useDashboardAuthGuard } from '@/lib/hooks/useDashboardAuthGuard';
+
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import { Pencil, RefreshCw, Copy } from "lucide-react";
+import { toast } from "sonner";
+
+
+type DashboardOverview = {
+  invoices: number;
+  currency: string;
+  activeSubscription: {
+    nbSubs: number;
+    nextInvoiceAt: string | null;
+  } | null;
+  proxiesInUse: {
+    active: number;
+    total: number | null;
+  };
+  bandwidth: {
+    points: {
+      bucket: string;   // ISO string
+      bytesIn: number;
+      bytesOut: number;
+      bytesTotal: number;
+    }[];
+  };
+};
 
 type ApiProxy = {
   allocationId: number;
@@ -65,222 +97,273 @@ type BandwidthPoint = {
 };
 
 type ProxiesResponse = {
+  // ex-overview
+  invoices: number;
+  currency: string;
+  activeSubscription: null | {
+    nbSubs: number;
+    nextInvoiceAt: string | null;
+  };
+  proxiesInUse: {
+    active: number;
+    total: number | null;
+  };
+  bandwidth: {
+    points: BandwidthPoint[];
+  };
+
+  // ex-proxies
   proxies: ApiProxy[];
   bandwidthByProxy: Record<number, BandwidthPoint[]>;
 };
 
 
-function formatDate(value: string | null) {
-  if (!value) return 'N/A';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return 'N/A';
-  return d.toLocaleString();
-}
-
-function statusColor(status: ApiProxy['status']) {
-  switch (status) {
-    case 'allocated':
-      return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
-    case 'available':
-      return 'bg-sky-500/10 text-sky-400 border-sky-500/30';
-    case 'maintenance':
-      return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
-    case 'disabled':
-    default:
-      return 'bg-red-500/10 text-red-400 border-red-500/30';
-  }
-}
-
-function formatBytes(bytes: number) {
-  if (!bytes || bytes === 0) return '0 B';
-
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-}
-
-/* ============================
- * CHART CONFIG
- * ============================ */
-
-const chartConfig = {
-  bandwidth: {
-    label: 'Bandwidth',
-  },
-  download: {
-    label: 'Download',
-    color: 'hsl(0 0% 92%)',
-  },
-  upload: {
-    label: 'Upload',
-    color: 'hsl(0 0% 65%)',
-  },
-} satisfies ChartConfig;
-
-function ProxyBandwidthChart({ points }: { points: BandwidthPoint[] }) {
-  const [timeRange, setTimeRange] = React.useState<'90d' | '30d' | '7d'>('90d');
-
-  const chartData = React.useMemo(
-    () =>
-      (points ?? []).map((p) => ({
-        date: p.bucket,
-        download: p.bytesIn,
-        upload: p.bytesOut,
-      })),
-    [points]
-  );
-
-  const filteredData = React.useMemo(() => {
-    if (!chartData.length) return [];
-
-    const referenceDate = new Date();
-    let daysToSubtract = 90;
-    if (timeRange === '30d') daysToSubtract = 30;
-    if (timeRange === '7d') daysToSubtract = 7;
-
-    const startDate = new Date(referenceDate);
-    startDate.setDate(startDate.getDate() - daysToSubtract);
-
-    return chartData.filter((item) => {
-      const d = new Date(item.date);
-      return d >= startDate;
-    });
-  }, [chartData, timeRange]);
-
+function ManageMonthlySpentSkeleton() {
   return (
-    <Card className="mb-6 pt-0">
-      <CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
-        <div className="grid flex-1 gap-1">
-          <CardTitle>Bandwidth usage</CardTitle>
-          <CardDescription>
-            Upload & download for the selected proxy over the chosen period.
-          </CardDescription>
-        </div>
-
-        <Select
-          value={timeRange}
-          onValueChange={(value) =>
-            setTimeRange(value as '90d' | '30d' | '7d')
-          }
-        >
-          <SelectTrigger
-            className="hidden w-[160px] rounded-lg sm:ml-auto sm:flex"
-            aria-label="Select a value"
-          >
-            <SelectValue placeholder="Last 3 months" />
-          </SelectTrigger>
-          <SelectContent className="rounded-xl">
-            <SelectItem value="90d" className="rounded-lg">
-              Last 3 months
-            </SelectItem>
-            <SelectItem value="30d" className="rounded-lg">
-              Last 30 days
-            </SelectItem>
-            <SelectItem value="7d" className="rounded-lg">
-              Last 7 days
-            </SelectItem>
-          </SelectContent>
-        </Select>
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle>Monthly Spent</CardTitle>
       </CardHeader>
-
-      <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
-        <ChartContainer
-          config={chartConfig}
-          className="aspect-auto h-[250px] w-full"
-        >
-          <AreaChart data={filteredData}>
-            <defs>
-              <linearGradient id="fillDownload" x1="0" y1="0" x2="0" y2="1">
-                <stop
-                  offset="5%"
-                  stopColor="var(--color-download)"
-                  stopOpacity={0.8}
-                />
-                <stop
-                  offset="95%"
-                  stopColor="var(--color-download)"
-                  stopOpacity={0.1}
-                />
-              </linearGradient>
-              <linearGradient id="fillUpload" x1="0" y1="0" x2="0" y2="1">
-                <stop
-                  offset="5%"
-                  stopColor="var(--color-upload)"
-                  stopOpacity={0.8}
-                />
-                <stop
-                  offset="95%"
-                  stopColor="var(--color-upload)"
-                  stopOpacity={0.1}
-                />
-              </linearGradient>
-            </defs>
-
-            <CartesianGrid vertical={false} />
-            <XAxis
-              dataKey="date"
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
-              minTickGap={32}
-              tickFormatter={(value) => {
-                const date = new Date(value);
-                return date.toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                });
-              }}
-            />
-
-            <ChartTooltip
-              cursor={false}
-              content={
-                <ChartTooltipContent
-                  labelFormatter={(value) =>
-                    new Date(value).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                    })
-                  }
-                  formatter={(value, name) => {
-                    const label =
-                      name === 'download' ? 'Download' : 'Upload';
-                    return [label, formatBytes(Number(value))];
-                  }}
-                  indicator="dot"
-                />
-              }
-            />
-
-            <Area
-              dataKey="download"
-              type="natural"
-              fill="url(#fillDownload)"
-              stroke="var(--color-download)"
-              stackId="a"
-            />
-            <Area
-              dataKey="upload"
-              type="natural"
-              fill="url(#fillUpload)"
-              stroke="var(--color-upload)"
-              stackId="a"
-            />
-            <ChartLegend content={<ChartLegendContent />} />
-          </AreaChart>
-        </ChartContainer>
+      <CardContent>
+        <div className="h-6 w-24 animate-pulse rounded bg-muted" />
+        <p className="mt-2 h-4 w-56 animate-pulse rounded bg-muted" />
       </CardContent>
     </Card>
   );
 }
 
+function ActiveSubscriptionSkeleton() {
+  return (
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle>Active Subscription</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-5 w-40 animate-pulse rounded bg-muted" />
+        <div className="mt-2 h-4 w-64 animate-pulse rounded bg-muted" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function NeedHelpSkeleton() {
+  return (
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle>Need Help?</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-4 w-64 animate-pulse rounded bg-muted" />
+        <div className="mt-2 h-9 w-32 animate-pulse rounded bg-muted" />
+      </CardContent>
+    </Card>
+  );
+}
 /* ============================
  * PAGE
  * ============================ */
 
+function MonthlySpentCard(props: {
+  amount: DashboardOverview['invoices'];
+  currency: DashboardOverview['currency'];
+}) {
+  const rawAmount = props.amount;
+  const rawCurrency = props.currency;
+
+  const amount =
+    typeof rawAmount === 'number' && !Number.isNaN(rawAmount)
+      ? rawAmount
+      : 0;
+
+  const currency = rawCurrency || 'USD';
+
+  return (
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle>Monthly Spent</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-2xl font-semibold">
+          {amount.toFixed(2)} {currency}
+        </p>
+        <p className="text-sm text-muted-foreground justify-baseline">
+          Total billed for the current billing period.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function ActiveSubscriptionCard(props: {
+  subscription: DashboardOverview['activeSubscription'];
+}) {
+  const { subscription } = props;
+  const router = useRouter();
+
+  if (!subscription) {
+    return (
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Active Subscription</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="font-medium">No active subscription.</p>
+          <p className="text-sm text-muted-foreground">
+            You can start a new subscription from the pricing page.
+          </p>
+        </CardContent>
+        <CardFooter>
+          <Button
+            className='my-1 flex justify-start shadow-none rounded-2xl text-sm'
+            size="sm"
+            variant="outline"
+            onClick={() => router.push('/dashboard/proxies')}
+          >
+            Subscribe 🚀
+          </Button>
+      </CardFooter>
+      </Card>
+    );
+  }
+
+  const nextInvoiceText = subscription.nextInvoiceAt
+    ? new Date(subscription.nextInvoiceAt).toLocaleDateString()
+    : 'N/A';
+  const nbSubs = subscription.nbSubs;
+
+  return (
+    <Card className="mb-8">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className='text-xl'>Active Subscriptions</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          Your next invoice is on {nextInvoiceText}.
+        </p>
+          <Button
+            className='my-1 flex justify-start shadow-none rounded-2xl text-md'
+            size="lg"
+            onClick={() => router.push('/dashboard/proxies')}
+          >
+            Manage Subscriptions
+          </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function NeedHelpCard() {
+  const router = useRouter();
+  return (
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle>Need Help?</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          Open a ticket from the support center or email us at
+          {' '}
+          support@ionproxy.com.
+        </p>
+      </CardContent>
+      <CardFooter className="mt-4 flex items-center justify-between">
+        {/* Bouton bas gauche */}
+        <Button
+          className='my-1 flex justify-start shadow-none rounded-2xl text-sm'
+          size="sm"
+          variant="outline"
+          onClick={() => router.push('/dashboard/help')}
+        >
+          Go to support
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 export default function ProxiesPage() {
+  type SubTypeFilter = "both" | "sub" | "pass";
+  type NetworkFilter = "all" | "4G" | "5G";
+
+
+  const [subType, setSubType] = React.useState<SubTypeFilter>("both");
+  const [network, setNetwork] = React.useState<NetworkFilter>("all");
+  const [country, setCountry] = React.useState<string>("all");
+  const [search, setSearch] = React.useState<string>("");
+
+  const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
+
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editTarget, setEditTarget] = React.useState<ApiProxy | null>(null);
+
+  const [editUsername, setEditUsername] = React.useState("");
+  const [editPassword, setEditPassword] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  const [cancelOpen, setCancelOpen] = React.useState(false);
+  const [cancelTarget, setCancelTarget] = React.useState<ApiProxy | null>(null);
+
+  const [cancelling, setCancelling] = React.useState(false);
+
+  async function cancelAllocation() {
+    if (!cancelTarget) return;
+
+    setCancelling(true);
+    try {
+      const res = await fetch(
+        `/api/dashboard/proxies/${cancelTarget.allocationId}/cancel`,
+        { method: "POST" } // ou DELETE/PATCH selon ton API
+      );
+      if (!res.ok) throw new Error("cancel failed");
+
+      setCancelOpen(false);
+      setCancelTarget(null);
+      await mutate();
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+
+  React.useEffect(() => {
+    if (!editTarget) return;
+
+    // ⚠️ adapte selon ton API (idéalement username/password séparés)
+    const creds = (editTarget as any).credentials as string | undefined; // ex: "user:pass"
+    const [u, p] = creds?.split(":") ?? ["", ""];
+    setEditUsername(u ?? "");
+    setEditPassword(p ?? "");
+  }, [editTarget]);
+
+  async function saveCredentials() {
+    if (!editTarget) return;
+
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/dashboard/proxies/${editTarget.allocationId}/credentials`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: editUsername,
+          password: editPassword,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed");
+
+      setEditOpen(false);
+      setEditTarget(null);
+      setEditUsername("");
+      setEditPassword("");
+
+      await mutate(); // refresh table
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Fetch proxies data
   const { data, error, isLoading, mutate } = useSWR<ProxiesResponse>(
     '/api/dashboard/proxies',
     apiFetcher
@@ -288,240 +371,508 @@ export default function ProxiesPage() {
 
   useDashboardAuthGuard(error);
 
+  const isErrored = !!error;
+
   const proxies = data?.proxies ?? [];
-  const bandwidthByProxy = data?.bandwidthByProxy ?? {};
 
-  // proxy sélectionné pour le chart
-  const [selectedProxyId, setSelectedProxyId] = React.useState<number | null>(null);
+  const countries = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const p of proxies) if (p.location) set.add(p.location);
+    return ["all", ...Array.from(set).sort()];
+  }, [proxies]);
+
+  const filtered = React.useMemo(() => {
+    return proxies.filter((p) => {
+      // NOTE: à adapter selon tes vrais champs
+      const pSubType = (p as any).subType as "sub" | "pass" | undefined;     // TODO API
+      const pNetwork = (p as any).networkType as "4G" | "5G" | undefined;   // TODO API
+
+      if (subType !== "both" && pSubType !== subType) return false;
+      if (network !== "all" && pNetwork !== network) return false;
+      if (country !== "all" && (p.location ?? "Unknown") !== country) return false;
+
+      if (search.trim()) {
+        const s = search.toLowerCase();
+        const hay = [
+          p.label ?? "",
+          p.ipAddress,
+          String(p.port),
+          p.location ?? "",
+          p.isp ?? "",
+        ].join(" ").toLowerCase();
+        if (!hay.includes(s)) return false;
+      }
+
+      return true;
+    });
+  }, [proxies, subType, network, country, search]);
+
+  const allChecked = filtered.length > 0 && filtered.every((p) => selectedIds.has(p.allocationId));
+  const someChecked = filtered.some((p) => selectedIds.has(p.allocationId)) && !allChecked;
+
+  function toggleAll() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allChecked) {
+        for (const p of filtered) next.delete(p.allocationId);
+      } else {
+        for (const p of filtered) next.add(p.allocationId);
+      }
+      return next;
+    });
+  }
+
+  function copyToClipboard(value: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      toast.success("Copied to clipboard");
+    }).catch(() => {
+      toast.error("Failed to copy");
+    });
+  }
+
+  function copyAllToClipboard(rows: ApiProxy[]) {
+    const lines = rows
+      .map((p) => {
+        const user = (p as any).username ?? "";
+        const pass = (p as any).password ?? "";
+        return `${p.ipAddress}:${p.port}:${user}:${pass}`;
+      })
+      .filter((l) => l !== ":::"); // optionnel si tu veux éviter les vides
+
+    const payload = lines.join("\n");
+
+    navigator.clipboard
+      .writeText(payload)
+      .then(() => toast.success("Copied selected proxies to clipboard"))
+      .catch(() => toast.error("Failed to copy"));
+  }
 
 
-  React.useEffect(() => {
-    if (!proxies.length) {
-      setSelectedProxyId(null);
-      return;
-    }
-    // si le proxy sélectionné n'existe plus (changement de data) → on prend le 1er
-    if (!selectedProxyId || !proxies.some(p => p.proxyId === selectedProxyId)) {
-      setSelectedProxyId(proxies[0].proxyId);
-    }
-  }, [proxies, selectedProxyId]);
-
-  const selectedProxy =
-    selectedProxyId != null
-      ? proxies.find((p) => p.proxyId === selectedProxyId) ?? null
-      : null;
-
-  const selectedPoints =
-    selectedProxyId != null ? bandwidthByProxy[selectedProxyId] ?? [] : [];
-
+  function toggleOne(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   return (
+    
     <section className="flex-1 p-4 lg:p-8">
-      {/* Titre + refresh global */}
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="text-lg font-medium lg:text-2xl">My Proxies</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          className="rounded-2xl shadow-none text-sm"
-          onClick={() => mutate()}
-        >
-          <RefreshCcw className="mr-2 h-4 w-4" />
-          Refresh
-        </Button>
-      </div>
-
-      {/* LOADING / ERROR / EMPTY */}
       {isLoading && !data && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Loading your proxies...</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Fetching allocated proxies for your account.
-          </CardContent>
-        </Card>
-      )}
-
-      {error && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-red-500">Error</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Failed to load your proxies. Please try again later.
-          </CardContent>
-        </Card>
-      )}
-
-      {!isLoading && !error && proxies.length === 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>No proxies allocated yet</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            You don&apos;t have any active proxies assigned to your account.
-            Start a subscription or contact support if you think this is an
-            error.
-          </CardContent>
-        </Card>
-      )}
-
-      {/* CONTENU QUAND ON A DES PROXYS */}
-      {!isLoading && !error && proxies.length > 0 && (
         <>
-          {/* ====== CARD BANDWIDTH PAR PROXY ====== */}
-          <Card className="mb-6">
-            <CardHeader className="border-b pb-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <CardTitle>
-                    Bandwidth per proxy
-                    {selectedProxy &&
-                      ` – ${
-                        selectedProxy.label ??
-                        `${selectedProxy.ipAddress}:${selectedProxy.port}`
-                      }`}
-                  </CardTitle>
-                  <CardDescription>
-                    Select a proxy below to inspect its bandwidth usage.
-                  </CardDescription>
-                </div>
-
-                {/* Carousel de sélection de proxy */}
-                <Carousel
-                  opts={{
-                    align: 'start',
-                    dragFree: true,
-                  }}
-                  className="w-full max-w-xl"
-                >
-                  <CarouselContent>
-                    {proxies.map((proxy) => {
-                      const active = proxy.proxyId === selectedProxyId;
-                      return (
-                        <CarouselItem
-                          key={proxy.proxyId}
-                          className="basis-1/2 sm:basis-1/3 lg:basis-1/4"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setSelectedProxyId(proxy.proxyId)}
-                            className={cn(
-                              'w-full rounded-2xl border px-3 py-2 text-left text-xs sm:text-sm transition',
-                              'bg-background/50 hover:bg-muted',
-                              active &&
-                                'border-emerald-500/60 bg-emerald-500/5 text-emerald-200'
-                            )}
-                          >
-                            <div className="font-medium truncate">
-                              {proxy.label ?? `Proxy #${proxy.proxyId}`}
-                            </div>
-                            <div className="text-[11px] text-muted-foreground truncate">
-                              {proxy.ipAddress}:{proxy.port}
-                            </div>
-                          </button>
-                        </CarouselItem>
-                      );
-                    })}
-                  </CarouselContent>
-                  <div className="mt-4 flex justify-center gap-4">
-                    <CarouselPrevious className="relative left-0 top-0 translate-y-0" />
-                    <CarouselNext className="relative right-0 top-0 translate-y-0" />
-                  </div>
-                </Carousel>
-              </div>
-            </CardHeader>
-
-            <CardContent className="pt-4">
-              <ProxyBandwidthChart points={selectedPoints} />
-            </CardContent>
-          </Card>
-
-          {/* ====== CAROUSEL DES CARDS PROXYS ====== */}
-          <Card>
-            <CardHeader className="pb-4">
-              <CardTitle>Allocated proxies</CardTitle>
-            </CardHeader>
-
-            <CardContent className="pt-0">
-              <Carousel
-                opts={{
-                  align: 'start',
-                  loop: false,
-                }}
-                className="w-full"
-              >
-                <CarouselContent>
-                  {proxies.map((proxy) => (
-                    <CarouselItem
-                      key={proxy.allocationId}
-                      className="basis-full md:basis-1/2 xl:basis-1/4"
-                    >
-                      <Card className="flex h-full flex-col justify-between">
-                        <CardHeader className="space-y-2 pb-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <CardTitle className="text-base">
-                              {proxy.label ?? `Proxy #${proxy.proxyId}`}
-                            </CardTitle>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                'border px-2 py-0.5 text-xs',
-                                statusColor(proxy.status)
-                              )}
-                            >
-                              {proxy.status}
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {proxy.ipAddress}:{proxy.port}
-                          </p>
-                        </CardHeader>
-
-                        <CardContent className="space-y-3 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4" />
-                            <span>
-                              {proxy.location ?? 'Unknown location'}
-                              {proxy.isp ? ` • ${proxy.isp}` : ''}
-                            </span>
-                          </div>
-
-                          {proxy.dongleId && (
-                            <div className="flex items-center gap-2">
-                              <Wifi className="h-4 w-4" />
-                              <span>Dongle ID: {proxy.dongleId}</span>
-                            </div>
-                          )}
-
-                          <div className="space-y-1">
-                            <p>
-                              <span className="font-medium text-foreground">
-                                Allocated since:
-                              </span>{' '}
-                              {formatDate(proxy.startsAt)}
-                            </p>
-                            <p>
-                              <span className="font-medium text-foreground">
-                                Last health check:
-                              </span>{' '}
-                              {formatDate(proxy.lastHealthCheck)}
-                            </p>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </CarouselItem>
-                  ))}
-                </CarouselContent>
-
-                <CarouselPrevious className="-left-16 top-1/2 -translate-y-1/2" />
-                <CarouselNext className="-right-16 top-1/2 -translate-y-1/2" />
-              </Carousel>
-            </CardContent>
-          </Card>
+          <ManageMonthlySpentSkeleton />
+          <ActiveSubscriptionSkeleton />
+          <NeedHelpSkeleton />
         </>
       )}
+      {isErrored && (
+        <>
+          <p className="mb-4 text-sm text-red-500">
+            Failed to load dashboard data. Please try again later.
+          </p>
+          <ManageMonthlySpentSkeleton />
+          <ActiveSubscriptionSkeleton />
+          <NeedHelpSkeleton />
+        </>
+      )}
+
+      {!isLoading && data && (
+        <div className="flex flex-col gap-6 w-full">
+          {/* Groupe du haut : 3 colonnes, même hauteur */}
+          <div className="grid w-full gap-6 md:grid-cols-3">
+            <MonthlySpentCard
+              amount={data.invoices}
+              currency={data.currency}
+            />
+            <ActiveSubscriptionCard
+              subscription={data.activeSubscription}
+            />
+            <NeedHelpCard />
+          </div>
+        </div>
+      )}
+      <Card>
+        <CardHeader className="border-b">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <CardTitle>My Proxies</CardTitle>
+              <CardDescription>Manage, filter and edit your allocated proxies.</CardDescription>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-2xl shadow-none"
+                onClick={() => mutate()}
+              >
+                <RefreshCcw className="mr-2 h-4 w-4" />
+                Refresh
+              </Button>
+
+              <Button size="sm" className="rounded-2xl">
+                Add Proxy
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="pt-6 space-y-4">
+          {/* LOADING / ERROR / EMPTY */}
+          {isLoading && !data && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading proxies...
+            </div>
+          )}
+
+          {error && (
+            <div className="text-sm text-red-500">
+              Failed to load your proxies. Please try again later.
+            </div>
+          )}
+
+          {!isLoading && !error && proxies.length === 0 && (
+            <div className="text-sm text-muted-foreground">
+              No proxies allocated yet.
+            </div>
+          )}
+
+          {/* TOOLBAR */}
+          {!isLoading && !error && proxies.length > 0 && (
+            <>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                {/* Sub / Pass / Both */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select value={subType} onValueChange={(v) => setSubType(v as any)}>
+                    <SelectTrigger className="w-[160px] rounded-2xl">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      <SelectItem value="both">Subs + Pass</SelectItem>
+                      <SelectItem value="sub">Subs only</SelectItem>
+                      <SelectItem value="pass">Pass only</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* 4G / 5G */}
+                  <Select value={network} onValueChange={(v) => setNetwork(v as any)}>
+                    <SelectTrigger className="w-[140px] rounded-2xl">
+                      <SelectValue placeholder="Network" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="4G">4G</SelectItem>
+                      <SelectItem value="5G">5G</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Country */}
+                  <Select value={country} onValueChange={setCountry}>
+                    <SelectTrigger className="w-[200px] rounded-2xl">
+                      <SelectValue placeholder="Country" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {countries.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c === "all" ? "All countries" : c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-2xl"
+                    disabled={selectedIds.size === 0}
+                    onClick={() => {
+                      // TODO: ouvrir modal bulk edit avec selectedIds
+                      console.log("Bulk edit", Array.from(selectedIds));
+                    }}
+                  >
+                    Bulk edit ({selectedIds.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-2xl"
+                    disabled={selectedIds.size === 0}
+                    onClick={() => {
+                              const selectedRows = filtered.filter((p) => selectedIds.has(p.allocationId));
+                              copyAllToClipboard(selectedRows);
+                            }}
+                  >
+                    Copy infos ({selectedIds.size})
+                  </Button>
+                </div>
+              </div>
+
+              {/* TABLE */}
+              <div className="rounded-2xl border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[44px]">
+                        <Checkbox
+                          checked={allChecked ? true : someChecked ? "indeterminate" : false}
+                          onCheckedChange={toggleAll}
+                          aria-label="Select all"
+                        />
+                      </TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Country</TableHead>
+                      <TableHead>IP</TableHead>
+                      <TableHead>User:Pass</TableHead>
+                      <TableHead>Rotate</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-center">Edit</TableHead>
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {filtered.map((p) => {
+                      const checked = selectedIds.has(p.allocationId);
+
+                      // NOTE: à adapter selon tes vrais champs API
+                      const rawUsername = (p as any).username;
+                      const rawPassword = (p as any).password;
+
+                      const username = typeof rawUsername === "string" ? rawUsername : "—";
+                      const password = typeof rawPassword === "string" ? rawPassword : "—";
+                      const type = (p as any).subType ?? "—";      // "sub" | "pass"
+
+                      return (
+                        <TableRow key={p.allocationId} data-state={checked ? "selected" : undefined}>
+                          <TableCell>
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggleOne(p.allocationId)}
+                              aria-label={`Select ${p.allocationId}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Badge className='bg-transparent'>
+                              <span className="flex items-center gap-1">
+                                <span className="h-3 w-3 rounded-full bg-green-500 inline-block" />
+                              </span>
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {p.location ?? "Unknown"}
+                          </TableCell>
+
+                          <TableCell className="group font-mono text-sm cursor-pointer select-none rounded-md transition"
+                                        onClick={() => copyToClipboard(`${username}:${password}`)}
+                                        title="Click to copy">
+                            {p.ipAddress}:{p.port} <Copy className="ml-1 inline h-3 w-3 opacity-60 hover:opacity-100" />
+                          </TableCell>
+
+                          <TableCell    className="group font-mono text-sm cursor-pointer select-none rounded-md transition"
+                                        onClick={() => copyToClipboard(`${username}:${password}`)}
+                                        title="Click to copy">
+                            {username}:{password} <Copy className="ml-1 inline h-3 w-3 opacity-60 hover:opacity-100" />
+                          </TableCell>
+
+                          <TableCell className="justify-center">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="rounded-2xl"
+                              onClick={async () => {
+                                try {
+                                  // adapte l’endpoint si besoin
+                                  const res = await fetch(
+                                    `/api/dashboard/proxies/${p.allocationId}/rotate`,
+                                    { method: "POST" }
+                                  );
+                                  if (!res.ok) throw new Error("rotate failed");
+                                  await mutate(); // refresh table
+                                } catch (e) {
+                                  console.error(e);
+                                }
+                              }}
+                              aria-label="Rotate proxy"
+                              title="Rotate proxy"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="rounded-xl">
+                              {type}
+                            </Badge>
+                          </TableCell>
+
+                          <TableCell className="text-center">
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="rounded-2xl"
+                                    aria-label="Actions"
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+
+                                <TooltipContent side="bottom" className="rounded-2xl p-3 w-44
+                                                                        bg-background/40 backdrop-blur-md
+                                                                        border border-border/50 shadow-xl
+                                                                        flex flex-col gap-2
+                                                                        [&_[data-popper-arrow]]:hidden">
+                                  <div className="flex flex-col gap-2 w-40">
+                                    <Button
+                                      size="sm"
+                                      className="rounded-xl h-8"
+                                      onClick={() => {
+                                        // EDIT : comportement identique à avant
+                                        setEditTarget(p);
+                                        setEditOpen(true);
+                                      }}
+                                    >
+                                      Edit
+                                    </Button>
+
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      className="rounded-xl h-8"
+                                      onClick={() => {
+                                        setCancelTarget(p);
+                                        setCancelOpen(true);
+                                      }}
+                                    >
+                                      <X className="mr-2 h-4 w-4" />
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <Dialog
+                open={editOpen}
+                onOpenChange={(open) => {
+                  setEditOpen(open);
+                  if (!open) setEditTarget(null);
+                }}
+              >
+                <DialogContent className="rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Edit proxy credentials</DialogTitle>
+                    <DialogDescription>
+                      Update username and password for this proxy.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="proxy-username">Username</Label>
+                      <Input
+                        id="proxy-username"
+                        value={editUsername}
+                        onChange={(e) => setEditUsername(e.target.value)}
+                        className="rounded-2xl"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="proxy-password">Password</Label>
+                      <Input
+                        id="proxy-password"
+                        type="password"
+                        value={editPassword}
+                        onChange={(e) => setEditPassword(e.target.value)}
+                        className="rounded-2xl"
+                        autoComplete="new-password"
+                      />
+                    </div>
+                  </div>
+
+                  <DialogFooter className="gap-2 sm:gap-4">
+                    <Button
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() => setEditOpen(false)}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </Button>
+
+                    <Button
+                      className="rounded-2xl"
+                      onClick={saveCredentials}
+                      disabled={saving || !editUsername || !editPassword}
+                    >
+                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Dialog
+                open={cancelOpen}
+                onOpenChange={(open) => {
+                  setCancelOpen(open);
+                  if (!open) setCancelTarget(null);
+                }}
+              >
+                <DialogContent className="rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Cancel this proxy?</DialogTitle>
+                    <DialogDescription>
+                      This will cancel the allocation for{" "}
+                      {cancelTarget
+                        ? (cancelTarget.label ?? `${cancelTarget.ipAddress}:${cancelTarget.port}`)
+                        : "this proxy"}
+                      . This action may be irreversible.
+                      Your proxy will remain available until the end of the month.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <DialogFooter className="gap-2 sm:gap-0">
+                    <Button
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() => setCancelOpen(false)}
+                      disabled={cancelling}
+                    >
+                      No, keep it
+                    </Button>
+
+                    <Button
+                      variant="destructive"
+                      className="rounded-2xl"
+                      onClick={cancelAllocation}
+                      disabled={cancelling}
+                    >
+                      {cancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Yes, cancel
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              {filtered.length === 0 && (
+                <div className="text-sm text-muted-foreground">
+                  No results for current filters.
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </section>
   );
+
 }

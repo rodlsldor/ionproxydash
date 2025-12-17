@@ -338,6 +338,8 @@ export async function getUserAllocatedProxies(userId: number) {
       proxyId: proxies.id,
       label: proxies.label,
       ipAddress: proxies.ipAddress,
+      username: proxies.username,
+      password: proxies.password,
       port: proxies.port,
       location: proxies.location,
       isp: proxies.isp,

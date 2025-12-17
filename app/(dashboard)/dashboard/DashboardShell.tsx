@@ -24,12 +24,9 @@ import { User, Smartphone, Repeat, FileQuestion, Wallet, Newspaper, Menu } from 
 import Image from 'next/image';
 
 const navItems = [
-  { href: '/dashboard', icon: User, label: 'Overview' },
   { href: '/dashboard/proxies', icon: Smartphone, label: 'My Proxies' },
-  { href: '/dashboard/subs', icon: Repeat, label: 'Subscriptions' },
   { href: '/dashboard/help', icon: FileQuestion, label: 'Help Center' },
   { href: '/dashboard/profile', icon: User, label: 'Profile' },
-  { href: '/dashboard/funds', icon: Wallet, label: 'Funds' },
   { href: '/dashboard/billing', icon: Newspaper, label: 'Billings' },
 ];
 

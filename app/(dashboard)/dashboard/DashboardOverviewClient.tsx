@@ -357,7 +357,7 @@ function ActiveSubscriptionCard(props: {
             className='my-1 flex justify-start shadow-none rounded-2xl text-sm'
             size="sm"
             variant="outline"
-            onClick={() => router.push('/dashboard/subs')}
+            onClick={() => router.push('/dashboard/proxies')}
           >
             Subscribe 🚀
           </Button>
@@ -369,25 +369,21 @@ function ActiveSubscriptionCard(props: {
   const nextInvoiceText = subscription.nextInvoiceAt
     ? new Date(subscription.nextInvoiceAt).toLocaleDateString()
     : 'N/A';
-  const nbSubs = subscription.nbSubs; // actuellement on gère qu'une seule subs
+  const nbSubs = subscription.nbSubs;
 
   return (
     <Card className="mb-8">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className='text-xl'>Active Subscriptions</CardTitle>
-        <span className="text-xl font-medium">
-          {nbSubs}
-        </span>
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">
-          Monitor and manage your {nbSubs} active subscriptions. Everything you need is just a click away.
           Your next invoice is on {nextInvoiceText}.
         </p>
           <Button
             className='my-1 flex justify-start shadow-none rounded-2xl text-md'
             size="lg"
-            onClick={() => router.push('/dashboard/subs')}
+            onClick={() => router.push('/dashboard/proxies')}
           >
             Manage Subscriptions
           </Button>

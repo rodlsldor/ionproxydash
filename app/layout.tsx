@@ -2,6 +2,8 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Lexend_Deca } from 'next/font/google';
 import { Providers } from './providers';
+import { Toaster } from "@/components/ui/sonner";
+
 
 export const metadata: Metadata = {
   title: 'Home - Ion Proxy DEV',
@@ -23,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`min-h-[100dvh] ${lexend.className}`}>
         <Providers>
           {children}
+          <Toaster position='top-center'/>
         </Providers>
       </body>
     </html>

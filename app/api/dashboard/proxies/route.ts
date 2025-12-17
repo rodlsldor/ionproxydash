@@ -2,7 +2,14 @@
 import { withAuthRoute } from '@/lib/auth/withAuthRoute';
 import { apiSuccess } from '@/lib/api/response';
 
-import { getUserAllocatedProxies } from '@/lib/db/queries';
+import {
+  getTotalPaidThisMonth,
+  getUserActiveProxies,
+  getUserSubscriptions,
+  getUserUsageSeries,
+  getUserAllocatedProxies,
+} from '@/lib/db/queries';
+
 import { getProxyUsageSeries } from '@/lib/db/queries/proxyUsage';
 
 type BandwidthPoint = {
@@ -15,16 +22,26 @@ type BandwidthPoint = {
 export const GET = withAuthRoute(async (_req, { auth }) => {
   const userId = auth.user.id;
 
-  // 1) Proxies alloués à l'utilisateur (via query existante)
-  const proxiesRows = await getUserAllocatedProxies(userId);
-
-  const proxyIds = proxiesRows.map((r) => Number(r.proxyId));
-
-  // 2) Bandwidth par proxy (90 jours, agrégé par jour) — via query existante
   const now = new Date();
   const from = new Date(now);
   from.setDate(from.getDate() - 90);
 
+  const [invoices, subs, activeAllocations, bandwidthSeries, proxiesRows] =
+    await Promise.all([
+      getTotalPaidThisMonth(userId),
+      getUserSubscriptions(userId),
+      getUserActiveProxies(userId),
+      getUserUsageSeries({
+        userId,
+        range: { from, to: now },
+        granularity: 'day',
+      }),
+      getUserAllocatedProxies(userId),
+    ]);
+
+  const sub = subs[0] ?? null;
+
+  const proxyIds = proxiesRows.map((r) => Number(r.proxyId));
   const bandwidthByProxy: Record<number, BandwidthPoint[]> = {};
   for (const id of proxyIds) bandwidthByProxy[id] = [];
 
@@ -33,7 +50,7 @@ export const GET = withAuthRoute(async (_req, { auth }) => {
       proxyIds.map(async (proxyId) => {
         const points = await getProxyUsageSeries({
           proxyId,
-          userId, // filtre par user (important)
+          userId,
           range: { from, to: now },
           granularity: 'day',
         });
@@ -63,6 +80,37 @@ export const GET = withAuthRoute(async (_req, { auth }) => {
 
   return apiSuccess(
     {
+      // ==== overview payload ====
+      invoices,
+      currency: 'USD',
+      activeSubscription: sub
+        ? {
+            nbSubs: subs.length,
+            nextInvoiceAt: sub.currentPeriodEnd,
+          }
+        : null,
+      proxiesInUse: {
+        active: activeAllocations.length,
+        total: null,
+      },
+      bandwidth: {
+        points: bandwidthSeries.map((p) => {
+          const raw = p.bucket as unknown;
+          const bucketIso =
+            raw instanceof Date
+              ? raw.toISOString()
+              : new Date(raw as any).toISOString();
+
+          return {
+            bucket: bucketIso,
+            bytesIn: p.bytesIn,
+            bytesOut: p.bytesOut,
+            bytesTotal: p.bytesTotal,
+          };
+        }),
+      },
+
+      // ==== proxies payload (ex-route /proxies) ====
       proxies: proxiesRows,
       bandwidthByProxy,
     },
