@@ -625,6 +625,7 @@ export default function ProxiesPage() {
                       <TableHead>Country</TableHead>
                       <TableHead>IP</TableHead>
                       <TableHead>User:Pass</TableHead>
+                      <TableHead>Copy Infos</TableHead>
                       <TableHead>Rotate</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead className="text-center">Edit</TableHead>
@@ -674,7 +675,48 @@ export default function ProxiesPage() {
                                         title="Click to copy">
                             {username}:{password} <Copy className="ml-1 inline h-3 w-3 opacity-60 hover:opacity-100" />
                           </TableCell>
+                          <TableCell    className="group font-mono text-sm cursor-pointer select-none rounded-md transition"
+                                        title="Click to copy">
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="rounded-2xl"
+                                    aria-label="Actions"
+                                  >
+                                    <Copy className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
 
+                                <TooltipContent side="bottom" className="rounded-2xl p-3 w-44
+                                                                        bg-background/40 backdrop-blur-md
+                                                                        border border-border/50 shadow-xl
+                                                                        flex flex-col gap-2
+                                                                        [&_[data-popper-arrow]]:hidden">
+                                  <div className="flex flex-col gap-2 w-40">
+                                    <Button
+                                      size="sm"
+                                      className="rounded-xl h-8"
+                                      onClick={() => copyToClipboard(`${p.ipAddress}:${p.port}:${username}:${password}`)}
+                                    >
+                                      ip:port:user:pass
+                                    </Button>
+
+                                    <Button
+                                      size="sm"
+                                      className="rounded-xl h-8"
+                                      onClick={() => copyToClipboard(`${username}:${password}@${p.ipAddress}:${p.port}`)}
+                                    >
+                                      user:pass@ip:port
+                                    </Button>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+
+                          </TableCell>
                           <TableCell className="justify-center">
                             <Button
                               variant="ghost"

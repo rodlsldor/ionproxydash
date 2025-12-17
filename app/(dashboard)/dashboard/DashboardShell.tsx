@@ -24,7 +24,7 @@ import { User, Smartphone, Repeat, FileQuestion, Wallet, Newspaper, Menu } from 
 import Image from 'next/image';
 
 const navItems = [
-  { href: '/dashboard/proxies', icon: Smartphone, label: 'My Proxies' },
+  { href: '/dashboard', icon: Smartphone, label: 'My Proxies' },
   { href: '/dashboard/help', icon: FileQuestion, label: 'Help Center' },
   { href: '/dashboard/profile', icon: User, label: 'Profile' },
   { href: '/dashboard/billing', icon: Newspaper, label: 'Billings' },

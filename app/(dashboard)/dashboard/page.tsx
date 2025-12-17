@@ -1,9 +1,6 @@
 // app/dashboard/page.tsx
-import { requireUserPage } from '@/lib/auth/user';
-import DashboardOverviewClient from './DashboardOverviewClient';
+import ProxiesPage from './ProxiesClient';
 
 export default async function DashboardPage() {
-  await requireUserPage();
-
-  return <DashboardOverviewClient />;
+  return <ProxiesPage />;
 }
